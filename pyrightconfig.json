@@ -1,0 +1,9 @@
+{
+  "include": ["apfun"],
+  "exclude": ["**/__pycache__", "**/.venv"],
+  "pythonVersion": "3.11",
+  "venvPath": ".",
+  "venv": ".venv",
+  "strict": ["apfun"],
+  "reportMissingTypeStubs": false
+}
