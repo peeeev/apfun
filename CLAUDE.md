@@ -24,6 +24,94 @@ All Anthropic calls route through `apfun/llm/client.py` so this policy is enforc
 - If a task feels in-between (e.g. summarizing one competitor's reviews), use Opus.
 - Use prompt caching on long, repeated context (review corpora, competitor matrices).
 
+## Orchestrator Pattern (External Review)
+
+This project uses a two-tier review process. You (Claude Code, in this container) are the **Implementer** — you write code, run tests, open PRs. A separate Claude session outside the container, accessed via the human, is the **Orchestrator** — it reviews architecture, enforces gates, catches drift across tasks.
+
+You don't talk to the Orchestrator directly. The human is the bridge: you write structured request files; the human pastes them into the chat; you receive responses as saved feedback files. This codifies a paper trail of architect-level decisions inside the repo.
+
+### When to initiate an Orchestrator request
+
+Proactively, without being asked:
+
+- **Phase transitions** in `docs/tasks/000-overview.md` (finishing Phase A foundations before starting Phase B sourcing, etc.).
+- **Open questions** you can't resolve from `project-brief.md`, `CLAUDE.md`, or prior feedback. Don't guess; ask.
+- **Schema migrations spanning >2 tables.** Foundational changes get reviewed.
+- **Tech-stack deviations** from `project-brief.md` §5.
+- **Anything that would materially change `CLAUDE.md` or `project-brief.md`.**
+
+Also: whenever the human says "run this by the Orchestrator."
+
+### Don't escalate for these (just keep going)
+
+- Per-task code review (the human reviews PRs inline).
+- Bug fixes that don't change architecture.
+- Tests, refactors within a single module, docstring improvements.
+- New endpoints that fit existing patterns.
+
+The Orchestrator is for direction-checking, not granular review. Over-escalation defeats the point.
+
+### How to package a request
+
+Write a file to `docs/orchestrator/NNN-short-topic.md` where NNN is zero-padded, one higher than the latest in that directory.
+
+Template:
+
+```markdown
+# Request NNN: <topic>
+
+**Context** (1-3 sentences): where we are in tasks, what just happened.
+
+**What I just did** (or am about to do): summarize concretely.
+
+**What I would do next without intervention**: the path I'd take silently.
+
+**Specific questions or risks**: bulleted; what I want flagged.
+
+**Relevant files/diffs**: paste inline or list paths. Keep it tight — verbose summaries lose the reader.
+```
+
+Then update `docs/orchestrator/INDEX.md` with a new row:
+
+```
+| NNN | YYYY-MM-DD | short-topic | open | --- |
+```
+
+Tell the human: "Orchestrator request NNN is ready in `docs/orchestrator/`." Stop and wait — don't proceed past the gate without feedback.
+
+### How to consume feedback
+
+At the start of every session, before any work:
+
+1. `ls docs/orchestrator/*-feedback.md`
+2. Read every feedback file you haven't acknowledged yet (oldest first).
+3. Update `INDEX.md`: change the row's status from `open` to `answered`, add a one-line summary of the decision in the last column.
+4. Append any durable lesson to `CLAUDE.md`'s "Lessons Learned" section.
+
+### Authority hierarchy
+
+If sources conflict, the precedence is:
+
+1. **Latest Orchestrator feedback** (highest authority — most recent direction wins)
+2. `project-brief.md` and `CLAUDE.md` (update these if feedback supersedes them)
+3. Earlier feedback files
+4. Your own prior decisions
+
+If feedback contradicts an earlier decision, the feedback wins. If feedback contradicts `CLAUDE.md` or `project-brief.md`, update the doc in the same PR and note the change.
+
+### INDEX.md format
+
+Append-only, one line per request:
+
+```
+| NNN | YYYY-MM-DD | topic-slug                | status   | one-line decision summary       |
+|-----|------------|---------------------------|----------|---------------------------------|
+| 001 | 2026-05-20 | gate2-stack-confirmation  | answered | sync DB, split status, Resend   |
+| 002 | 2026-05-24 | phase-a-complete          | open     | ---                             |
+```
+
+Status values: `open` (request submitted, no feedback yet), `answered` (feedback received and applied).
+
 ## Project conventions
 
 - Python 3.11+. Format with `ruff format`, lint with `ruff check`, type-check with `pyright` (strict on `apfun/`).
