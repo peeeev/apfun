@@ -2,6 +2,8 @@
 
 **Goal:** Compute a `scores` row per approved candidate with full breakdown.
 
+**Complexity:** M
+
 Depends on: 016. Pulls review data populated by extending task 009's miner to also fetch for the top-3 competitors identified in 016.
 
 ## Deliverables

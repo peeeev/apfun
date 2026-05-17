@@ -5,9 +5,9 @@ Sequenced, PR-sized, each ~half-day and independently testable. Numbers are the 
 ## Phase A — Foundations
 
 - 001 — Project scaffolding (pyproject + uv + ruff/pyright + FastAPI hello on `0.0.0.0:4000`)
-- 002 — DB foundations (SQLAlchemy 2 async + Alembic + `sources`/`raw_signals`/`candidates`)
+- 002 — DB foundations (SQLAlchemy 2 sync + Alembic + `sources`/`raw_signals`/`candidates` with `decision`/`pipeline_stage` split)
 - 003 — DB pipeline tables (`demand_checks`, `approvals`, `competitive_analyses`, `scores`, `opportunities`, `projects`, `llm_runs`, `scheduler_runs`)
-- 004 — LLM client wrapper (Anthropic Async, model-policy guard, prompt caching, `llm_runs` logging)
+- 004 — LLM client wrapper (`anthropic.Anthropic` sync, model-policy guard, prompt caching, `llm_runs` logging)
 
 ## Phase B — Stage 1 sourcing
 
@@ -34,7 +34,7 @@ Sequenced, PR-sized, each ~half-day and independently testable. Numbers are the 
 - 016 — Stage 3 competitor scraping (pricing pages, feature lists, recent funding)
 - 017 — Stage 4 saturation scoring (Demand × UnmetPain / IncumbentStrength, full breakdown persisted)
 - 018 — Stage 5 differentiation synthesis (Opus 4.7: complaints / feature gaps / pricing gaps / vertical wedge)
-- 019 — Pipeline orchestration (HITL approval triggers Stage 3 → 4 → 5 async)
+- 019 — Pipeline orchestration (HITL approval queues Stage 3 → 4 → 5 onto `BackgroundScheduler`)
 
 ## Phase F — Output + remaining UI
 
@@ -44,7 +44,7 @@ Sequenced, PR-sized, each ~half-day and independently testable. Numbers are the 
 
 ## Open questions (from brief §14, parked)
 
-- Email provider for the digest (Mailgun / Postmark / SES) — decide during task 022.
+- Email provider for the digest: **Resend** (free tier covers v1 forever). Mailgun / Postmark / SES are fallbacks if verification ever fails.
 - DataForSEO monthly cap default ($25 unless contradicted) — wired in task 015.
 - Reddit auth (public JSON vs. registered app) — start with public JSON in task 005; revisit if rate-limited.
 - SQLite → Postgres migration threshold (~100k `raw_signals`) — track row count, no action in v1.

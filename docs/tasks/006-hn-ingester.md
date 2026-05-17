@@ -2,6 +2,8 @@
 
 **Goal:** Pull HN posts and comments matching opportunity-revealing patterns ("Ask HN: what tool…", "show me a SaaS that…", "I wish there were…") into `raw_signals`.
 
+**Complexity:** S
+
 Depends on: 002.
 
 ## Deliverables

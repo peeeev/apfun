@@ -115,12 +115,13 @@ Status values: `open` (request submitted, no feedback yet), `answered` (feedback
 ## Project conventions
 
 - Python 3.11+. Format with `ruff format`, lint with `ruff check`, type-check with `pyright` (strict on `apfun/`).
-- Async-first: FastAPI handlers, `anthropic.AsyncAnthropic`, `httpx.AsyncClient`. Sync code only where a library forces it (e.g. `pytrends`); isolate inside a threadpool.
+- **Concurrency model: sync everywhere except FastAPI handlers.** Handlers may be `async def` (framework convention) but only do short, non-blocking DB reads and quick task enqueues — no LLM calls or scrapes inline. Long work runs on APScheduler `BackgroundScheduler` jobs (sync threads). LLM client: `anthropic.Anthropic` (sync). HTTP scrapers: `httpx.Client` (sync). **Why:** SQLite + async + concurrent writes from APScheduler is a known locking footgun; sync threading + `busy_timeout` + WAL gives clear serializable-write semantics.
+- DB: SQLAlchemy 2.x sync + SQLite via stdlib `sqlite3`. Enable WAL on connect (`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000`). Migrations through Alembic, one per logical schema change.
 - Dependencies: `uv`. Add with `uv add`; commit `uv.lock`. Don't hand-edit deps in `pyproject.toml`.
-- DB: SQLAlchemy 2.x async + SQLite via `aiosqlite`. Migrations through Alembic, one per logical schema change.
 - Tests: `pytest` under `tests/unit/` and `tests/integration/`. Cached SERP/Reddit/HN fixtures under `tests/fixtures/`. No network in unit tests.
 - Templates: Jinja2 + HTMX. No JS framework. Minimal Tailwind via the standalone CLI; no Node toolchain.
 - Commits: imperative mood ("add reddit ingester"), no co-author line, no emojis. Reference the task number when applicable ("001: scaffold FastAPI app").
+- Task files in `docs/tasks/` carry a `**Complexity:** S/M/L` line (S ≈ 1h, M ≈ half-day, L ≈ full day) for planning.
 - Don't add scope. A bug fix is a bug fix. One task = one PR. If you notice an adjacent issue, log it as a new task rather than expanding the current one.
 
 ## File layout
@@ -128,7 +129,7 @@ Status values: `open` (request submitted, no feedback yet), `answered` (feedback
 - `apfun/` — application package
 - `apfun/main.py` — FastAPI app entrypoint, binds `0.0.0.0:4000`
 - `apfun/config.py` — settings (env-driven), feature flags
-- `apfun/db.py` — engine + async session factory
+- `apfun/db.py` — engine + sync session factory (WAL pragmas applied on connect)
 - `apfun/models/` — SQLAlchemy ORM models
 - `apfun/llm/client.py` — single Anthropic entrypoint; enforces model policy and logs runs
 - `apfun/sourcing/` — one module per source (reddit, hn, ph, ih, review_sites)
@@ -155,4 +156,7 @@ Status values: `open` (request submitted, no feedback yet), `answered` (feedback
 
 ## Lessons learned
 
-(Append corrections from the human here so the lesson persists. Empty to start.)
+- 2026-05-17: DB layer is sync (`sqlite3` + sync SQLAlchemy + `BackgroundScheduler`). SQLite + async + concurrent writes is a known locking footgun. See "Concurrency model" in Project conventions.
+- 2026-05-17: `candidates` has two status columns: `decision` (HITL outcome — pending/approved/rejected/auto_killed) and `pipeline_stage` (machine progress — none/competitive/scoring/synthesizing/done/failed). Don't merge.
+- 2026-05-17: Weekly digest provider defaults to Resend (free tier covers v1 forever).
+- 2026-05-17: Each task file in `docs/tasks/` carries a `**Complexity:** S/M/L` line.

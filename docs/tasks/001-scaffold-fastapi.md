@@ -2,9 +2,11 @@
 
 **Goal:** A `uv`-managed Python project with a FastAPI app that responds on `0.0.0.0:4000`, plus formatting / linting / type-checking baselines.
 
+**Complexity:** M
+
 ## Deliverables
 - `pyproject.toml` with `apfun` package metadata, Python ≥3.11, deps: `fastapi`, `uvicorn[standard]`, `httpx`, `pydantic-settings`, `jinja2`, `python-multipart`.
-- Dev deps: `ruff`, `pyright`, `pytest`, `pytest-asyncio`.
+- Dev deps: `ruff`, `pyright`, `pytest`.
 - `uv.lock` committed.
 - `.gitignore` (Python, `data/`, `.venv/`, `.env`, `.ruff_cache`, `__pycache__`).
 - `.env.example` with `APFUN_*` placeholders (no real secrets).

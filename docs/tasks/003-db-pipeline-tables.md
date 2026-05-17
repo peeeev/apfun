@@ -2,6 +2,8 @@
 
 **Goal:** Remaining tables for Stages 2–6 plus observability.
 
+**Complexity:** M
+
 Depends on: 002.
 
 ## Tables

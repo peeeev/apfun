@@ -2,11 +2,13 @@
 
 **Goal:** Pull recent posts from a configurable set of subreddits into `raw_signals`, deduped.
 
+**Complexity:** M
+
 Depends on: 002.
 
 ## Deliverables
-- `apfun/sourcing/reddit.py`: async function `ingest(session, source)` reads `source.config_json` for `{"subreddits": [...], "since_hours": 6, "fetch_kind": "new"|"top"}`.
-- Fetches `https://www.reddit.com/r/<sub>/new.json?limit=100` (public JSON, no auth) via `httpx.AsyncClient` with a polite `User-Agent: apfun/0.1 (alex@apfun.online)`.
+- `apfun/sourcing/reddit.py`: sync function `ingest(session, source)` reads `source.config_json` for `{"subreddits": [...], "since_hours": 6, "fetch_kind": "new"|"top"}`.
+- Fetches `https://www.reddit.com/r/<sub>/new.json?limit=100` (public JSON, no auth) via `httpx.Client` with a polite `User-Agent: apfun/0.1 (alex@apfun.online)`.
 - Per-post: build `content_hash = sha256(subreddit + permalink + title + selftext)`, skip if already present in `raw_signals`.
 - Inserts new rows with `payload_json` containing `{title, selftext, author, score, num_comments, permalink, created_utc, subreddit, flair}`.
 - Updates `source.last_fetched_at` on success / `source.last_error` on failure.

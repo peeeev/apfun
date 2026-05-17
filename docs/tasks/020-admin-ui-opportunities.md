@@ -2,6 +2,8 @@
 
 **Goal:** List + detail views for Stage 5 outputs. Sortable; dense; clickable through to source signals.
 
+**Complexity:** M
+
 Depends on: 018, 013.
 
 ## Deliverables

@@ -2,6 +2,8 @@
 
 **Goal:** The most important LLM step in the system. Take the full review corpus + feature matrix + pricing + SERP and synthesize a differentiation angle.
 
+**Complexity:** M
+
 Depends on: 017.
 
 ## Deliverables
@@ -22,7 +24,7 @@ Depends on: 017.
 ## Acceptance
 - Integration test (opt-in, real API) on one fully-populated candidate produces a valid `opportunities` row whose JSON validates against the schema.
 - Re-running on the same candidate updates the existing `opportunities` row rather than inserting a duplicate.
-- Failure mode: if the LLM returns invalid JSON, the call is retried once with `repair_json=true`, then logs an `llm_runs` error and marks the candidate `status=synthesis_failed`.
+- Failure mode: if the LLM returns invalid JSON, the call is retried once with `repair_json=true`, then logs an `llm_runs` error; the orchestrator (task 019) sets `pipeline_stage='failed'` with `reason='synthesis_invalid_json'` in `pipeline_runs`.
 
 ## Notes
 - This is the highest-value Opus call in the whole system. Burn tokens here — extended thinking budget should be ample.

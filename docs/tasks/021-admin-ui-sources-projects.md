@@ -2,6 +2,8 @@
 
 **Goal:** Two small operational views.
 
+**Complexity:** S
+
 Depends on: 012, 013, 020.
 
 ## Deliverables

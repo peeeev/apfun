@@ -2,6 +2,8 @@
 
 **Goal:** For an approved candidate, identify the top competitors (from SERP + "alternatives to" queries) and capture pricing, features, and recent funding for each.
 
+**Complexity:** L
+
 Depends on: 009, 015.
 
 ## Deliverables

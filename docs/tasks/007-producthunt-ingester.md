@@ -2,6 +2,8 @@
 
 **Goal:** Capture recent launches + (where possible) their negative-space signals.
 
+**Complexity:** S
+
 Depends on: 002.
 
 ## Deliverables

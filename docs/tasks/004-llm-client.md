@@ -2,12 +2,14 @@
 
 **Goal:** Single Anthropic entrypoint that enforces the model policy, supports prompt caching, and logs every call to `llm_runs`.
 
+**Complexity:** M
+
 Depends on: 003.
 
 ## Deliverables
 - Dep: `anthropic`.
 - `apfun/llm/client.py`:
-  - `class LLMClient` wrapping `anthropic.AsyncAnthropic`.
+  - `class LLMClient` wrapping `anthropic.Anthropic` (sync).
   - Method `judge(task: str, system, messages, *, cache_blocks=None, thinking="high")` → uses `claude-opus-4-7` with extended thinking.
   - Method `mechanic(task: str, system, messages)` → uses `claude-haiku-4-5`.
   - Refuse a call to `mechanic` for a task in a `JUDGMENT_TASKS` set (`cluster`, `score`, `synthesize`, `prd`, `architecture`) — raise `PolicyViolation`.
@@ -22,4 +24,4 @@ Depends on: 003.
   - `mechanic("dedup", ...)` issues a request with `model=claude-haiku-4-5`.
   - `mechanic("cluster", ...)` raises `PolicyViolation` without making any network call.
   - A row is written to `llm_runs` on success and on failure.
-- No call sites of `anthropic.AsyncAnthropic` exist outside `apfun/llm/`. Add a `ruff` rule or a pyright-friendly re-export to make this enforceable.
+- No call sites of `anthropic.Anthropic` exist outside `apfun/llm/`. Add a `ruff` rule or a pyright-friendly re-export to make this enforceable.

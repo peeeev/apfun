@@ -2,6 +2,8 @@
 
 **Goal:** Server-rendered HTMX + Jinja + Tailwind base, with shared layout, navigation, and dark-mode-default styling. No app auth.
 
+**Complexity:** M
+
 Depends on: 001.
 
 ## Deliverables

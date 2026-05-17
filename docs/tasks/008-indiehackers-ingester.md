@@ -2,6 +2,8 @@
 
 **Goal:** Pull recent IH posts where people describe pains, failed tools, or "I built X" stories.
 
+**Complexity:** M
+
 Depends on: 002.
 
 ## Deliverables

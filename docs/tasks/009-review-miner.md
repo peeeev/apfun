@@ -2,6 +2,8 @@
 
 **Goal:** Pull 1–3★ reviews on a configurable set of tracked products. The most differentiation-rich source in the funnel.
 
+**Complexity:** L
+
 Depends on: 002.
 
 ## Deliverables
