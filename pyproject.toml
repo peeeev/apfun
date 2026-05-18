@@ -44,3 +44,11 @@ select = [
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "integration: tests that hit the network or external services (opt-in)",
+]
+
