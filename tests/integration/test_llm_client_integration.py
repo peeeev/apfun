@@ -28,7 +28,7 @@ pytestmark = [
 @pytest.fixture
 def client(engine: Engine) -> LLMClient:
     factory = sessionmaker(bind=engine)
-    return LLMClient(session_factory=lambda: factory())
+    return LLMClient(_session_factory=lambda: factory())
 
 
 def test_judge_smoke(client: LLMClient, engine: Engine) -> None:

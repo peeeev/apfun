@@ -13,6 +13,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from apfun.llm.client import (
+    DEFAULT_THINKING_BUDGET,
     JUDGE_MODEL,
     JUDGMENT_TASKS,
     MECHANIC_MODEL,
@@ -68,7 +69,7 @@ def make_client(engine: Engine) -> Callable[..., ClientPair]:
             mock.messages.create.return_value = (
                 response if response is not None else _make_response()
             )
-        client = LLMClient(client=mock, session_factory=lambda: factory())
+        client = LLMClient(client=mock, _session_factory=lambda: factory())
         return client, mock
 
     return _make
@@ -89,7 +90,9 @@ def test_mechanic_uses_haiku_no_thinking(make_client: Callable[..., ClientPair])
     assert "thinking" not in kwargs
 
 
-def test_judge_uses_opus_with_thinking(make_client: Callable[..., ClientPair]) -> None:
+def test_judge_uses_opus_with_explicit_thinking_budget(
+    make_client: Callable[..., ClientPair],
+) -> None:
     client, mock = make_client(response=_make_response(has_thinking=True))
     client.judge(
         "synthesize",
@@ -102,12 +105,24 @@ def test_judge_uses_opus_with_thinking(make_client: Callable[..., ClientPair]) -
     assert kwargs["thinking"] == {"type": "enabled", "budget_tokens": 10_000}
 
 
-def test_judge_with_default_thinking_budget(make_client: Callable[..., ClientPair]) -> None:
+@pytest.mark.parametrize(("task", "expected"), list(DEFAULT_THINKING_BUDGET.items()))
+def test_judge_per_task_default_thinking_budget(
+    make_client: Callable[..., ClientPair], task: str, expected: int
+) -> None:
+    """Each task in DEFAULT_THINKING_BUDGET gets its specific budget when none is passed."""
     client, mock = make_client()
-    client.judge("cluster", "sys", [{"role": "user", "content": "go"}])
+    client.judge(task, "sys", [{"role": "user", "content": "go"}])
     thinking = mock.messages.create.call_args.kwargs["thinking"]
-    assert thinking["type"] == "enabled"
-    assert 8_000 <= thinking["budget_tokens"] <= 16_000
+    assert thinking == {"type": "enabled", "budget_tokens": expected}
+
+
+def test_judge_unknown_task_uses_fallback_budget(
+    make_client: Callable[..., ClientPair],
+) -> None:
+    """A task not in DEFAULT_THINKING_BUDGET falls back to 12000."""
+    client, mock = make_client()
+    client.judge("competitor_pricing_review", "sys", [{"role": "user", "content": "go"}])
+    assert mock.messages.create.call_args.kwargs["thinking"]["budget_tokens"] == 12_000
 
 
 def test_logs_to_llm_runs_with_correct_cost(
@@ -128,6 +143,7 @@ def test_logs_to_llm_runs_with_correct_cost(
     assert row.cache_read_tokens == 5_000
     assert row.attempts == 1
     assert row.ok is True
+    assert row.retry_log_json == []
     expected = estimate_cost_usd(
         JUDGE_MODEL,
         input_tokens=10_000,
@@ -153,7 +169,7 @@ def test_cache_blocks_marked_ephemeral(make_client: Callable[..., ClientPair]) -
     assert system[1] == {"type": "text", "text": "per-call instructions"}
 
 
-def test_retry_then_succeed_logs_attempts_2(
+def test_retry_then_succeed_logs_attempts_2_and_retry_log(
     make_client: Callable[..., ClientPair],
     engine: Engine,
     monkeypatch: pytest.MonkeyPatch,
@@ -165,9 +181,15 @@ def test_retry_then_succeed_logs_attempts_2(
         row = s.execute(select(LLMRun)).scalar_one()
     assert row.ok is True
     assert row.attempts == 2
+    # The first (failed) attempt is in retry_log_json; the successful final
+    # attempt's outcome is in the top-level columns.
+    assert len(row.retry_log_json) == 1
+    assert row.retry_log_json[0]["attempt"] == 1
+    assert row.retry_log_json[0]["error_type"] == "RateLimitError"
+    assert "latency_ms" in row.retry_log_json[0]
 
 
-def test_retry_exhausted_logs_failure(
+def test_retry_exhausted_logs_failure_and_full_retry_log(
     make_client: Callable[..., ClientPair],
     engine: Engine,
     monkeypatch: pytest.MonkeyPatch,
@@ -183,6 +205,10 @@ def test_retry_exhausted_logs_failure(
     assert row.ok is False
     assert row.attempts == 3
     assert row.error is not None and "RateLimitError" in row.error
+    # retry_log_json contains the two failed attempts BEFORE the final one;
+    # the final attempt's error is in the top-level `error` column.
+    assert len(row.retry_log_json) == 2
+    assert [r["attempt"] for r in row.retry_log_json] == [1, 2]
 
 
 def test_timeout_passed_per_call(make_client: Callable[..., ClientPair]) -> None:

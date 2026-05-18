@@ -41,16 +41,19 @@ JUDGMENT_TASKS: frozenset[str] = frozenset(
 )
 
 
-# Pricing in USD per 1M tokens. Compute est_cost_usd at call time and persist the
-# dollar value (not the formula), so historical rows survive price changes.
-# When Anthropic posts new prices: update the numbers AND bump the verified date.
+# Pricing in USD per 1M tokens. Verified against docs.anthropic.com/pricing.
+# Compute est_cost_usd at call time and persist the dollar value (not the formula)
+# so historical rows survive future price changes. Cache write rates are for the
+# 5-minute ephemeral cache (the default `cache_control: ephemeral` TTL); if a call
+# site ever sets `ttl="1h"`, add a `cache_write_1h` key here (Opus 4.7: $10/MTok;
+# Haiku 4.5: $2/MTok). Bump the verified date below whenever this dict changes.
 # verified 2026-05-18
 PRICING: dict[str, dict[str, float]] = {
     "claude-opus-4-7": {
-        "input": 15.0,
-        "output": 75.0,
-        "cache_read": 1.50,
-        "cache_write": 18.75,
+        "input": 5.0,
+        "output": 25.0,
+        "cache_read": 0.50,
+        "cache_write": 6.25,
     },
     "claude-haiku-4-5": {
         "input": 1.0,
@@ -61,10 +64,24 @@ PRICING: dict[str, dict[str, float]] = {
 }
 
 
+# Per-task default thinking budgets for `judge()`. Spend reasoning where it pays off:
+# Stage 5 synthesis is the most important call in the system (where opportunity
+# quality lives), so it gets the largest budget. Stage 1 clustering is dedup-pass
+# work over narrow choices — 4k is enough. Callers can override with an explicit
+# `thinking_budget_tokens=N` kwarg. Retune from `llm_runs` data once we have it.
+DEFAULT_THINKING_BUDGET: dict[str, int] = {
+    "cluster": 4_000,  # Stage 1: dedup over narrow choices
+    "score": 8_000,  # Stage 4: quantitative weighing
+    "synthesize": 16_000,  # Stage 5: differentiation — the highest-stakes call
+    "prd": 12_000,  # Gate 1: PRD generation
+    "architecture": 12_000,  # Gate 2: tech-stack proposals
+}
+
+
 _MAX_RETRIES: int = 3
 _JUDGE_TIMEOUT_S: int = 120
 _MECHANIC_TIMEOUT_S: int = 30
-_JUDGE_THINKING_BUDGET_TOKENS: int = 12_000
+_FALLBACK_THINKING_BUDGET: int = 12_000
 _JUDGE_MAX_TOKENS: int = 8_000
 _MECHANIC_MAX_TOKENS: int = 2_000
 
@@ -113,7 +130,14 @@ def _backoff_seconds(attempt: int) -> float:
 
 
 def _build_system(system: str, cache_blocks: list[str] | None) -> str | list[dict[str, Any]]:
-    """Build the system parameter. With cache_blocks, mark them ephemeral."""
+    """Build the system parameter. With cache_blocks, mark them ephemeral.
+
+    Current shape: each entry in `cache_blocks` becomes a system content block
+    tagged `cache_control: ephemeral`, with `system` appended uncached at the end.
+    Doesn't yet support caching the per-call `system` string itself, partial
+    caching of `messages` content, or `ttl="1h"` cache control — generalize the
+    parameter shape when a real call site needs finer control.
+    """
     if not cache_blocks:
         return system
     blocks: list[dict[str, Any]] = []
@@ -140,14 +164,15 @@ class LLMClient:
         self,
         *,
         client: anthropic.Anthropic | None = None,
-        session_factory: Callable[[], Session] | None = None,
+        _session_factory: Callable[[], Session] | None = None,
     ) -> None:
         # max_retries=0 — the wrapper owns the retry loop so it can log attempts.
         self._client = client or anthropic.Anthropic(
             api_key=settings.anthropic_api_key,
             max_retries=0,
         )
-        self._session_factory: Callable[[], Session] = session_factory or SessionLocal
+        # Test seam (not public API): override the session factory in unit tests.
+        self._session_factory: Callable[[], Session] = _session_factory or SessionLocal
 
     def judge(
         self,
@@ -156,11 +181,21 @@ class LLMClient:
         messages: list[dict[str, Any]],
         *,
         cache_blocks: list[str] | None = None,
-        thinking_budget_tokens: int = _JUDGE_THINKING_BUDGET_TOKENS,
+        thinking_budget_tokens: int | None = None,
         max_tokens: int = _JUDGE_MAX_TOKENS,
         candidate_id: int | None = None,
     ) -> Message:
-        """Opus 4.7 with extended thinking. Use for any task that needs judgment."""
+        """Opus 4.7 with extended thinking. Use for any task that needs judgment.
+
+        `thinking_budget_tokens=None` (default) → look up DEFAULT_THINKING_BUDGET[task],
+        falling back to `_FALLBACK_THINKING_BUDGET` if the task isn't in the dict.
+        Pass an explicit int to override.
+        """
+        budget = (
+            thinking_budget_tokens
+            if thinking_budget_tokens is not None
+            else DEFAULT_THINKING_BUDGET.get(task, _FALLBACK_THINKING_BUDGET)
+        )
         return self._call(
             model=JUDGE_MODEL,
             task=task,
@@ -169,7 +204,7 @@ class LLMClient:
             cache_blocks=cache_blocks,
             timeout_s=_JUDGE_TIMEOUT_S,
             max_tokens=max_tokens,
-            thinking={"type": "enabled", "budget_tokens": thinking_budget_tokens},
+            thinking={"type": "enabled", "budget_tokens": budget},
             candidate_id=candidate_id,
         )
 
@@ -223,8 +258,10 @@ class LLMClient:
         if thinking is not None:
             kwargs["thinking"] = thinking
 
+        retry_log: list[dict[str, Any]] = []
         started = time.monotonic()
         for attempt in range(1, _MAX_RETRIES + 1):
+            attempt_started = time.monotonic()
             try:
                 # Cast: SDK's create() overloads don't resolve through **kwargs.
                 msg = cast(
@@ -235,6 +272,14 @@ class LLMClient:
                 )
             except _RETRYABLE as e:
                 if attempt < _MAX_RETRIES:
+                    retry_log.append(
+                        {
+                            "attempt": attempt,
+                            "error_type": type(e).__name__,
+                            "error_msg": str(e),
+                            "latency_ms": int((time.monotonic() - attempt_started) * 1000),
+                        }
+                    )
                     time.sleep(_backoff_seconds(attempt))
                     continue
                 self._log_failure(
@@ -244,6 +289,7 @@ class LLMClient:
                     latency_ms=_ms_since(started),
                     candidate_id=candidate_id,
                     error=f"{type(e).__name__}: {e}",
+                    retry_log_json=retry_log,
                 )
                 raise
             except anthropic.APIError as e:
@@ -255,6 +301,7 @@ class LLMClient:
                     latency_ms=_ms_since(started),
                     candidate_id=candidate_id,
                     error=f"{type(e).__name__}: {e}",
+                    retry_log_json=retry_log,
                 )
                 raise
 
@@ -280,6 +327,7 @@ class LLMClient:
                     cache_read_tokens=cache_read,
                     cache_write_tokens=cache_write,
                 ),
+                retry_log_json=retry_log,
             )
             return msg
 
@@ -299,6 +347,7 @@ class LLMClient:
         cache_read_tokens: int,
         cache_write_tokens: int,
         est_cost_usd: float,
+        retry_log_json: list[dict[str, Any]],
     ) -> None:
         with self._session_factory() as s:
             s.add(
@@ -315,6 +364,7 @@ class LLMClient:
                     candidate_id=candidate_id,
                     ok=True,
                     error=None,
+                    retry_log_json=retry_log_json,
                 )
             )
             s.commit()
@@ -328,6 +378,7 @@ class LLMClient:
         latency_ms: int,
         candidate_id: int | None,
         error: str,
+        retry_log_json: list[dict[str, Any]],
     ) -> None:
         with self._session_factory() as s:
             s.add(
@@ -339,6 +390,7 @@ class LLMClient:
                     candidate_id=candidate_id,
                     ok=False,
                     error=error,
+                    retry_log_json=retry_log_json,
                 )
             )
             s.commit()

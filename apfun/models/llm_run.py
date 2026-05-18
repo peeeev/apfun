@@ -5,11 +5,15 @@ Logged by the single LLM entrypoint at `apfun/llm/client.py` (task 004).
 the audit log and to enforce the model-selection policy.
 `attempts` records how many SDK calls the wrapper made before settling — 1 if
 the first call succeeded; up to `_MAX_RETRIES` on transient failures.
+`retry_log_json` captures per-attempt error details for attempts BEFORE the
+final one (the final attempt's outcome lives in `ok`, `error`, `latency_ms`).
 """
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Float, ForeignKey, Index, Integer, String, Text
+from typing import Any
+
+from sqlalchemy import JSON, Boolean, Float, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from apfun.models.base import Base, IdMixin, TimestampMixin
@@ -31,6 +35,9 @@ class LLMRun(Base, IdMixin, TimestampMixin):
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     est_cost_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    retry_log_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'")
+    )
     candidate_id: Mapped[int | None] = mapped_column(
         ForeignKey("candidates.id", ondelete="SET NULL"),
         nullable=True,
