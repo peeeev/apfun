@@ -73,6 +73,17 @@ def main() -> None:
         messages=[{"role": "user", "content": "second call"}],
     )
 
+    # Guard against a misleading fixture: if the second call missed cache,
+    # cache_read_input_tokens would be 0 and the tripwire test would lock in
+    # a synthetic-shaped capture instead of a real cache-hit capture. Better
+    # to fail loudly and retry than save the wrong shape.
+    cache_read = getattr(msg.usage, "cache_read_input_tokens", None) or 0
+    if cache_read <= 0:
+        raise RuntimeError(
+            f"second call did not hit cache (cache_read_input_tokens={cache_read}). "
+            "Anthropic's cache may have evicted between calls; re-run."
+        )
+
     _FIXTURE_PATH.parent.mkdir(parents=True, exist_ok=True)
     _FIXTURE_PATH.write_text(json.dumps(msg.model_dump(mode="json"), indent=2))
     print(f"wrote {_FIXTURE_PATH}")

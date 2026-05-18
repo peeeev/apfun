@@ -1,4 +1,5 @@
 {
+  "_meta_note": "SYNTHETIC FIXTURE — replace with a real capture via scripts/capture_response_fixture.py on the next make test-all run.",
   "id": "msg_synthetic_001",
   "type": "message",
   "role": "assistant",

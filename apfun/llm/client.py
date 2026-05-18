@@ -38,8 +38,10 @@ MECHANIC_MODEL: str = "claude-haiku-4-5"
 # violation. Membership is semantically anchored to project-brief.md §3 (Model
 # Selection Policy): anything involving niche evaluation, competitor analysis,
 # prioritization, or "is this opportunity real" belongs here. Don't let the set
-# drift into "things I added LLM calls for so far." Add new judgment tasks as
-# they materialize (e.g., a future "evaluate_vertical_fit" call site).
+# drift into "things I added LLM calls for so far."
+#
+# Extend in the same PR that adds the call site — never preemptively. Each
+# entry must correspond to an actual judge() callsite somewhere in the repo.
 # verified 2026-05-18 project-brief.md §3
 JUDGMENT_TASKS: frozenset[str] = frozenset(
     {
@@ -384,6 +386,8 @@ class LLMClient:
         budget = int(thinking.get("budget_tokens", 0))
         if budget <= 0:
             return
+        # TODO: when SDK exposes thinking_tokens separately (post v0.102.0),
+        # switch this signal from output_tokens to thinking_tokens for precision.
         if output_tokens >= _THINKING_BUDGET_WARN_FRACTION * budget:
             logger.warning(
                 "judge(task=%r): output_tokens=%d is >=%d%% of thinking budget %d; "
