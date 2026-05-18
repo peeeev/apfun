@@ -11,6 +11,7 @@ needed, add a new entrypoint here with rationale and update the policy.
 
 from __future__ import annotations
 
+import logging
 import random
 import time
 from collections.abc import Callable
@@ -24,12 +25,22 @@ from apfun.config import settings
 from apfun.db import SessionLocal
 from apfun.models import LLMRun
 
+logger = logging.getLogger(__name__)
+
+
+# Model identifiers — both confirmed present on Anthropic's pricing page.
+# verified 2026-05-18 https://docs.anthropic.com/en/docs/about-claude/pricing
 JUDGE_MODEL: str = "claude-opus-4-7"
 MECHANIC_MODEL: str = "claude-haiku-4-5"
 
 
 # Tasks that REQUIRE judge() — calling mechanic() with one of these is a policy
-# violation. New judgment tasks must be added here with a brief rationale.
+# violation. Membership is semantically anchored to project-brief.md §3 (Model
+# Selection Policy): anything involving niche evaluation, competitor analysis,
+# prioritization, or "is this opportunity real" belongs here. Don't let the set
+# drift into "things I added LLM calls for so far." Add new judgment tasks as
+# they materialize (e.g., a future "evaluate_vertical_fit" call site).
+# verified 2026-05-18 project-brief.md §3
 JUDGMENT_TASKS: frozenset[str] = frozenset(
     {
         "cluster",  # Stage 1: clustering raw signals into idea cards
@@ -41,13 +52,13 @@ JUDGMENT_TASKS: frozenset[str] = frozenset(
 )
 
 
-# Pricing in USD per 1M tokens. Verified against docs.anthropic.com/pricing.
-# Compute est_cost_usd at call time and persist the dollar value (not the formula)
-# so historical rows survive future price changes. Cache write rates are for the
-# 5-minute ephemeral cache (the default `cache_control: ephemeral` TTL); if a call
-# site ever sets `ttl="1h"`, add a `cache_write_1h` key here (Opus 4.7: $10/MTok;
-# Haiku 4.5: $2/MTok). Bump the verified date below whenever this dict changes.
-# verified 2026-05-18
+# Pricing in USD per 1M tokens. Compute est_cost_usd at call time and persist
+# the dollar value (not the formula) so historical rows survive price changes.
+# Cache write rates are for the 5-minute ephemeral cache (the default
+# `cache_control: ephemeral` TTL); if a call site ever sets `ttl="1h"`, add a
+# `cache_write_1h` key here (Opus 4.7: $10/MTok; Haiku 4.5: $2/MTok). Bump the
+# verified date below whenever this dict changes.
+# verified 2026-05-18 https://docs.anthropic.com/en/docs/about-claude/pricing
 PRICING: dict[str, dict[str, float]] = {
     "claude-opus-4-7": {
         "input": 5.0,
@@ -68,7 +79,9 @@ PRICING: dict[str, dict[str, float]] = {
 # Stage 5 synthesis is the most important call in the system (where opportunity
 # quality lives), so it gets the largest budget. Stage 1 clustering is dedup-pass
 # work over narrow choices — 4k is enough. Callers can override with an explicit
-# `thinking_budget_tokens=N` kwarg. Retune from `llm_runs` data once we have it.
+# `thinking_budget_tokens=N` kwarg. Retune triggers documented in CLAUDE.md →
+# Lessons learned; don't tune silently.
+# verified 2026-05-18 docs/orchestrator/004-feedback.md
 DEFAULT_THINKING_BUDGET: dict[str, int] = {
     "cluster": 4_000,  # Stage 1: dedup over narrow choices
     "score": 8_000,  # Stage 4: quantitative weighing
@@ -78,12 +91,32 @@ DEFAULT_THINKING_BUDGET: dict[str, int] = {
 }
 
 
+# Retry and timeout shape comes from orchestrator feedback 003. SDK default is
+# max_retries=2; we override to 3 so the wrapper-side count is visible in
+# llm_runs.attempts. Timeouts are task-kind-shaped: judge() with extended
+# thinking can take ~2 minutes; mechanic() short calls finish well under 30s.
+# verified 2026-05-18 docs/orchestrator/003-feedback.md
 _MAX_RETRIES: int = 3
 _JUDGE_TIMEOUT_S: int = 120
 _MECHANIC_TIMEOUT_S: int = 30
+
+
 _FALLBACK_THINKING_BUDGET: int = 12_000
 _JUDGE_MAX_TOKENS: int = 8_000
 _MECHANIC_MAX_TOKENS: int = 2_000
+
+
+# Warn when judge() output_tokens >= this fraction of the thinking budget —
+# signal that the budget is undersized for this task. Retune trigger; see
+# CLAUDE.md → Lessons learned.
+_THINKING_BUDGET_WARN_FRACTION: float = 0.9
+
+
+# Cache-control marker for the 5-minute ephemeral cache. If a call site needs
+# ttl="1h" (e.g., long-running batch reuse beyond 5 min), extend _build_system
+# and update PRICING with a `cache_write_1h` key.
+# verified 2026-05-18 https://docs.anthropic.com/en/docs/about-claude/pricing
+_EPHEMERAL_CACHE_CONTROL: dict[str, str] = {"type": "ephemeral"}
 
 
 _RETRYABLE: tuple[type[Exception], ...] = (
@@ -133,10 +166,10 @@ def _build_system(system: str, cache_blocks: list[str] | None) -> str | list[dic
     """Build the system parameter. With cache_blocks, mark them ephemeral.
 
     Current shape: each entry in `cache_blocks` becomes a system content block
-    tagged `cache_control: ephemeral`, with `system` appended uncached at the end.
-    Doesn't yet support caching the per-call `system` string itself, partial
-    caching of `messages` content, or `ttl="1h"` cache control — generalize the
-    parameter shape when a real call site needs finer control.
+    tagged `cache_control: ephemeral` (5-min TTL), with `system` appended uncached
+    at the end. Doesn't yet support caching the per-call `system` string itself,
+    partial caching of `messages` content, or `ttl="1h"` cache control — generalize
+    the parameter shape when a real call site needs finer control.
     """
     if not cache_blocks:
         return system
@@ -146,7 +179,7 @@ def _build_system(system: str, cache_blocks: list[str] | None) -> str | list[dic
             {
                 "type": "text",
                 "text": block,
-                "cache_control": {"type": "ephemeral"},
+                "cache_control": _EPHEMERAL_CACHE_CONTROL,
             }
         )
     blocks.append({"type": "text", "text": system})
@@ -310,6 +343,7 @@ class LLMClient:
             output_tokens = int(usage.output_tokens or 0)
             cache_read = int(getattr(usage, "cache_read_input_tokens", None) or 0)
             cache_write = int(getattr(usage, "cache_creation_input_tokens", None) or 0)
+            self._maybe_warn_budget(task=task, thinking=thinking, output_tokens=output_tokens)
             self._log_success(
                 task=task,
                 model=model,
@@ -333,6 +367,33 @@ class LLMClient:
 
         # The retry loop returns or raises on every path; if we reach here, something is wrong.
         raise RuntimeError("LLMClient retry loop exited without success or exception")
+
+    @staticmethod
+    def _maybe_warn_budget(
+        *, task: str, thinking: dict[str, Any] | None, output_tokens: int
+    ) -> None:
+        """Log a WARNING if a judge() call's output approaches its thinking budget.
+
+        Heuristic — uses total output_tokens (thinking + text) as a proxy because
+        anthropic's Usage doesn't surface thinking_tokens separately as of SDK
+        0.102.0. Conservative: fires for "thinking probably maxed" and "output
+        was just very large." Both warrant a budget retune look.
+        """
+        if thinking is None:
+            return
+        budget = int(thinking.get("budget_tokens", 0))
+        if budget <= 0:
+            return
+        if output_tokens >= _THINKING_BUDGET_WARN_FRACTION * budget:
+            logger.warning(
+                "judge(task=%r): output_tokens=%d is >=%d%% of thinking budget %d; "
+                "consider raising DEFAULT_THINKING_BUDGET[%r] or passing thinking_budget_tokens=N",
+                task,
+                output_tokens,
+                int(_THINKING_BUDGET_WARN_FRACTION * 100),
+                budget,
+                task,
+            )
 
     def _log_success(
         self,

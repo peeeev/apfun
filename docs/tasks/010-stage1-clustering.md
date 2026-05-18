@@ -23,3 +23,4 @@ Depends on: 004, plus at least one ingester (005–009).
 ## Notes
 - Stage 1 is one of the three "judgment" stages. Never let `judge` get re-pointed at Haiku here.
 - Cap a single Opus call's input at ~150k tokens. Chunk if needed; combine clusters across chunks via a second pass.
+- **Cache TTL**: if a clustering batch's wall-clock duration exceeds 5 minutes (the default `cache_control: ephemeral` TTL), the cache misses on later calls in the batch and most of the savings evaporate. Extend `apfun/llm/client.py::_build_system` to accept `ttl="1h"` and route the shared system prompt through it. Update `PRICING` to include `cache_write_1h` (Opus 4.7: $10/MTok; verified against docs.anthropic.com/pricing). If batches stay under 5 minutes, no change needed — but plan for it.

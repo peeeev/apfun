@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from unittest.mock import MagicMock
 
@@ -220,3 +221,39 @@ def test_timeout_passed_per_call(make_client: Callable[..., ClientPair]) -> None
     client_j, mock_j = make_client()
     client_j.judge("cluster", "sys", [{"role": "user", "content": "go"}])
     assert mock_j.with_options.call_args.kwargs["timeout"] == 120
+
+
+def test_judge_warns_when_output_approaches_thinking_budget(
+    make_client: Callable[..., ClientPair],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """cluster's budget is 4000; output_tokens=3700 (92%) should warn."""
+    response = _make_response(output_tokens=3_700)
+    client, _ = make_client(response=response)
+    with caplog.at_level(logging.WARNING, logger="apfun.llm.client"):
+        client.judge("cluster", "sys", [{"role": "user", "content": "x"}])
+    assert any("thinking budget" in r.getMessage() for r in caplog.records)
+
+
+def test_judge_does_not_warn_below_threshold(
+    make_client: Callable[..., ClientPair],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Below the 90% threshold, no warning."""
+    response = _make_response(output_tokens=100)
+    client, _ = make_client(response=response)
+    with caplog.at_level(logging.WARNING, logger="apfun.llm.client"):
+        client.judge("cluster", "sys", [{"role": "user", "content": "x"}])
+    assert not any("thinking budget" in r.getMessage() for r in caplog.records)
+
+
+def test_mechanic_does_not_warn_about_thinking_budget(
+    make_client: Callable[..., ClientPair],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """mechanic() has no thinking — never triggers the budget warning."""
+    response = _make_response(output_tokens=2_000)
+    client, _ = make_client(response=response)
+    with caplog.at_level(logging.WARNING, logger="apfun.llm.client"):
+        client.mechanic("dedup", "sys", [{"role": "user", "content": "x"}])
+    assert not any("thinking budget" in r.getMessage() for r in caplog.records)
