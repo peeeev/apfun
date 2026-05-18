@@ -3,6 +3,8 @@
 Logged by the single LLM entrypoint at `apfun/llm/client.py` (task 004).
 `task` is a short tag ("cluster", "dedup", "synthesize", ...) used to filter
 the audit log and to enforce the model-selection policy.
+`attempts` records how many SDK calls the wrapper made before settling — 1 if
+the first call succeeded; up to `_MAX_RETRIES` on transient failures.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ class LLMRun(Base, IdMixin, TimestampMixin):
     cache_write_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     est_cost_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     candidate_id: Mapped[int | None] = mapped_column(
         ForeignKey("candidates.id", ondelete="SET NULL"),
         nullable=True,

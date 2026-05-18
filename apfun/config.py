@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 4000
     db_url: str = "sqlite:///data/apfun.db"
+    anthropic_api_key: str = ""
 
     @field_validator("host")
     @classmethod
