@@ -8,7 +8,7 @@ Depends on: 001.
 
 ## Deliverables
 - Deps: `sqlalchemy`, `alembic`.
-- `apfun/db.py`: sync engine (URL from settings, default `sqlite:///data/apfun.db`), `sessionmaker`, FastAPI dependency `get_session`. An `@event.listens_for(engine, "connect")` hook applies `PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000` on every new connection.
+- `apfun/db.py`: sync engine (URL from settings, default `sqlite:///data/apfun.db`), `sessionmaker`, FastAPI dependency `get_session`. A SQLAlchemy `connect` event listener applies `PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON` on every new connection (SQLite pragmas are per-connection — `foreign_keys` defaults off otherwise).
 - `apfun/models/base.py`: `DeclarativeBase` with `id`/`created_at`/`updated_at` mixins.
 - `apfun/models/source.py` — `sources` table (see data model below).
 - `apfun/models/raw_signal.py` — `raw_signals` with unique `content_hash`.
@@ -32,5 +32,5 @@ The two columns are independent: Stage 2 may flip `decision='auto_killed'` while
 ## Acceptance
 - `python scripts/init_db.py` creates `data/apfun.db` with all four tables.
 - `alembic downgrade base && alembic upgrade head` round-trips without error.
-- A fresh connection has WAL active: `PRAGMA journal_mode;` returns `wal`.
+- A session-scoped connection has the pragmas set: `PRAGMA journal_mode` → `wal`, `PRAGMA foreign_keys` → 1, `PRAGMA synchronous` → 1, `PRAGMA busy_timeout` → 5000. Verified by `tests/unit/test_db_pragmas.py`.
 - Unit test inserts a `source`, a `raw_signal` referencing it, a `candidate` (defaulting to `decision='pending'`, `pipeline_stage='none'`), and links them via `candidate_signals`.

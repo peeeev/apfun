@@ -13,9 +13,10 @@ def healthz() -> dict[str, bool]:
 
 
 def main() -> None:
+    """Run a production-shaped server. Dev uses `uvicorn ... --reload` directly."""
     import uvicorn
 
-    uvicorn.run("apfun.main:app", host=settings.host, port=settings.port, reload=True)
+    uvicorn.run("apfun.main:app", host=settings.host, port=settings.port)
 
 
 if __name__ == "__main__":

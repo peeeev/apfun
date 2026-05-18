@@ -1,6 +1,6 @@
 {
-  "include": ["apfun"],
-  "exclude": ["**/__pycache__", "**/.venv"],
+  "include": ["apfun", "tests", "scripts"],
+  "exclude": ["**/__pycache__", "**/.venv", "migrations/versions"],
   "pythonVersion": "3.11",
   "venvPath": ".",
   "venv": ".venv",

@@ -14,6 +14,8 @@ You run inside a dev container. `/workspace` is bind-mounted from the host at `/
 
 Bind any HTTP/ASGI server to `0.0.0.0:4000`. Never `127.0.0.1`. Apache on the host reverse-proxies `https://apfun.online` → host `127.0.0.1:4000` → container `0.0.0.0:4000`. Localhost-only binding inside the container is unreachable from the host. Port 4000 is the only port that matters.
 
+**Canonical container CMD:** `uv run uvicorn apfun.main:app --host 0.0.0.0 --port 4000`. This is what the host's `docker-compose.yml` should put in its `command:` line. The `python -m apfun.main` form works too (and boots the same app) but the uvicorn CLI is canonical because it exposes `--workers`, `--log-level`, etc. without code changes.
+
 ## Model selection policy
 
 All Anthropic calls route through `apfun/llm/client.py` so this policy is enforced in one place. Every call is logged to the `llm_runs` table (model, prompt/completion tokens, latency, est. cost, task).
@@ -116,7 +118,7 @@ Status values: `open` (request submitted, no feedback yet), `answered` (feedback
 
 - Python 3.11+. Format with `ruff format`, lint with `ruff check`, type-check with `pyright` (strict on `apfun/`).
 - **Concurrency model: sync everywhere except FastAPI handlers.** Handlers may be `async def` (framework convention) but only do short, non-blocking DB reads and quick task enqueues — no LLM calls or scrapes inline. Long work runs on APScheduler `BackgroundScheduler` jobs (sync threads). LLM client: `anthropic.Anthropic` (sync). HTTP scrapers: `httpx.Client` (sync). **Why:** SQLite + async + concurrent writes from APScheduler is a known locking footgun; sync threading + `busy_timeout` + WAL gives clear serializable-write semantics.
-- DB: SQLAlchemy 2.x sync + SQLite via stdlib `sqlite3`. Enable WAL on connect (`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000`). Migrations through Alembic, one per logical schema change.
+- DB: SQLAlchemy 2.x sync + SQLite via stdlib `sqlite3`. Apply pragmas via a `connect` event listener so they fire on every new connection (the pool can open new ones at any time): `PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON`. Migrations through Alembic, one per logical schema change.
 - Dependencies: `uv`. Add with `uv add`; commit `uv.lock`. Don't hand-edit deps in `pyproject.toml`.
 - Tests: `pytest` under `tests/unit/` and `tests/integration/`. Cached SERP/Reddit/HN fixtures under `tests/fixtures/`. No network in unit tests.
 - Templates: Jinja2 + HTMX. No JS framework. Minimal Tailwind via the standalone CLI; no Node toolchain.
