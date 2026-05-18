@@ -119,6 +119,8 @@ Status values: `open` (request submitted, no feedback yet), `answered` (feedback
 - Python 3.11+. Format with `ruff format`, lint with `ruff check`, type-check with `pyright` (strict on `apfun/`).
 - **Concurrency model: sync everywhere except FastAPI handlers.** Handlers may be `async def` (framework convention) but only do short, non-blocking DB reads and quick task enqueues — no LLM calls or scrapes inline. Long work runs on APScheduler `BackgroundScheduler` jobs (sync threads). LLM client: `anthropic.Anthropic` (sync). HTTP scrapers: `httpx.Client` (sync). **Why:** SQLite + async + concurrent writes from APScheduler is a known locking footgun; sync threading + `busy_timeout` + WAL gives clear serializable-write semantics.
 - DB: SQLAlchemy 2.x sync + SQLite via stdlib `sqlite3`. Apply pragmas via a `connect` event listener so they fire on every new connection (the pool can open new ones at any time): `PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON`. Migrations through Alembic, one per logical schema change.
+- **JSON columns are reassign-only.** SQLAlchemy does not track in-place mutations of dict/list values in `JSON` columns. Build the new value locally and assign it whole: `row.payload_json = {**row.payload_json, "k": "v"}`, never `row.payload_json["k"] = "v"`. Use `MutableDict.as_mutable(JSON)` only for a specific column that genuinely needs in-place tracking — most of ours are write-once.
+- **Every FK column gets an explicit index.** SQLite does not auto-index FK columns. Add `index=True` on the `mapped_column`. A UNIQUE constraint already implies an index, so FK+UNIQUE columns don't need another one.
 - Dependencies: `uv`. Add with `uv add`; commit `uv.lock`. Don't hand-edit deps in `pyproject.toml`.
 - Tests: `pytest` under `tests/unit/` and `tests/integration/`. Cached SERP/Reddit/HN fixtures under `tests/fixtures/`. No network in unit tests.
 - Templates: Jinja2 + HTMX. No JS framework. Minimal Tailwind via the standalone CLI; no Node toolchain.
@@ -162,3 +164,6 @@ Status values: `open` (request submitted, no feedback yet), `answered` (feedback
 - 2026-05-17: `candidates` has two status columns: `decision` (HITL outcome — pending/approved/rejected/auto_killed) and `pipeline_stage` (machine progress — none/competitive/scoring/synthesizing/done/failed). Don't merge.
 - 2026-05-17: Weekly digest provider defaults to Resend (free tier covers v1 forever).
 - 2026-05-17: Each task file in `docs/tasks/` carries a `**Complexity:** S/M/L` line.
+- 2026-05-18: JSON columns are reassign-only (no MutableDict by default). See "JSON columns are reassign-only" in Project conventions.
+- 2026-05-18: Every FK column gets an explicit `index=True`; SQLite doesn't auto-index FKs.
+- 2026-05-18: SQLAlchemy `Enum(native_enum=False)` doesn't emit a DB-level `CHECK` constraint by itself — add `CheckConstraint(check_enum_sql(...))` in `__table_args__`. Helpers live in `apfun/models/base.py`.
