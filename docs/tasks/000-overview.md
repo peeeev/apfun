@@ -42,6 +42,10 @@ Sequenced, PR-sized, each ~half-day and independently testable. Numbers are the 
 - 021 — Admin UI: sources health + projects views
 - 022 — Weekly digest email (Mondays 9am; defer provider choice to that task)
 
+## Cross-cutting
+
+- 023 — GitHub Actions CI (sequenced between Phase E and Phase F per orchestrator feedback 009 — PR-review teeth land before the final UI/digest tasks; file-number is post-022 but execution-order is pre-020)
+
 ## Open questions (from brief §14, parked)
 
 - Email provider for the digest: **Resend** (free tier covers v1 forever). Mailgun / Postmark / SES are fallbacks if verification ever fails.
