@@ -71,6 +71,15 @@ _HN_QUERY_BUNDLES: list[tuple[str, list[str]]] = [
     ),
 ]
 
+# IndieHackers groups per task 008 spec. Each entry becomes one Source row;
+# the source's `groups` config drives per-group fan-out inside a single
+# `ingest()` call.
+_IH_GROUPS: list[tuple[str, list[str]]] = [
+    ("ih:main", ["main"]),
+    ("ih:starting-up", ["starting-up"]),
+    ("ih:ideas-and-validation", ["ideas-and-validation"]),
+]
+
 # ProductHunt surfaces per task 007 spec / feedback 013 heads-up:
 # - topic surface catches newer launches under specific verticals
 # - leaderboard surface catches the high-attention curated set
@@ -129,6 +138,17 @@ def _ensure_hn_source(session: Session, name: str, queries: list[str]) -> bool:
     return True
 
 
+def _ensure_ih_source(session: Session, name: str, groups: list[str]) -> bool:
+    existing = session.execute(
+        select(Source).where(Source.kind == "indiehackers", Source.name == name)
+    ).scalar_one_or_none()
+    if existing is not None:
+        return False
+    config: dict[str, Any] = {"groups": groups, "since_hours": 24}
+    session.add(Source(kind="indiehackers", name=name, config_json=config, is_active=True))
+    return True
+
+
 def _ensure_ph_source(session: Session, name: str, config: dict[str, Any]) -> bool:
     existing = session.execute(
         select(Source).where(Source.kind == "producthunt", Source.name == name)
@@ -150,6 +170,11 @@ def main() -> int:
                 skipped += 1
         for name, queries in _HN_QUERY_BUNDLES:
             if _ensure_hn_source(session, name, queries):
+                inserted += 1
+            else:
+                skipped += 1
+        for name, groups in _IH_GROUPS:
+            if _ensure_ih_source(session, name, groups):
                 inserted += 1
             else:
                 skipped += 1
