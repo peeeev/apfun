@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
-import pytest
-from sqlalchemy import Engine, create_engine, event
-from sqlalchemy.orm import Session, sessionmaker
+# Must run BEFORE any apfun import — `apfun.config.Settings()` fails-loud at
+# construction without APFUN_REDDIT_USERNAME (per docs/tasks/005-reddit-
+# ingester.md → Config). The test default is a sentinel handle that mirrors
+# the production UA format without claiming a real Reddit account.
+os.environ.setdefault("APFUN_REDDIT_USERNAME", "apfun_test_runner")
 
-from apfun.db import apply_sqlite_pragmas
+import pytest  # noqa: E402
+from sqlalchemy import Engine, create_engine, event  # noqa: E402
+from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
+
+from apfun.db import apply_sqlite_pragmas  # noqa: E402
 
 # Importing this package registers every model on Base.metadata.
-from apfun.models import Base
+from apfun.models import Base  # noqa: E402
 
 
 @pytest.fixture
