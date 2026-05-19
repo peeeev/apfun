@@ -43,3 +43,4 @@ Depends on: nothing strictly — the codebase as it stands.
 - GitHub Actions sets `CI=true` automatically; the skip-condition leverages it.
 - If we later switch to a self-hosted runner (Hetzner box), the workflow shape stays — only the `runs-on` line changes.
 - The `make test-all` workflow is a deliberate manual gate; running it on every PR would cost ~$0.05/PR plus rate-limit pressure. The forcing-function fixture replacement happens out-of-band by the developer with their own API key.
+- **`contents: read` only.** If we ever consider auto-committing captured fixtures from a CI dispatch, it must be gated behind `workflow_dispatch` with human review of the diff before merge. The fixture-as-contract pattern relies on a human-review moment; automation would silently launder API flakiness into the test suite.

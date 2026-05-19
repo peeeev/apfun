@@ -48,10 +48,17 @@ Apply the verify-constants convention from CLAUDE.md (both `# verified` and `# h
 ### Source health: three-strikes auto-disable
 
 - New Alembic migration adds `consecutive_failures INT NOT NULL DEFAULT 0` to `sources`.
+- `TERMINAL_STATUSES = frozenset({403, 404, 410})` — 410 Gone is the rarest, most explicit "permanently gone" signal (per feedback 010 Q2). Everything else (5xx, 429, timeouts, connection errors) logs but doesn't increment — those are about us or Reddit, not about the sub being dead.
 - On any successful fetch for a source: reset `consecutive_failures = 0`.
-- On a terminal-status failure (`403`, `404`): increment.
-- When `consecutive_failures >= 3 AND status in {403, 404}`: set `is_active = False` and log a WARNING. Avoid hammering dead subreddits while not over-reacting to transient errors.
-- Per orchestrator feedback 009 Q3.
+- On a `status in TERMINAL_STATUSES` failure: increment.
+- When `consecutive_failures >= 3 AND status in TERMINAL_STATUSES`: set `is_active = False` and log a WARNING.
+- **UA-block guard** (feedback 010 Q2): if >50% of sources in a single batch return 403, treat as a global UA-block (our UA was malformed or blocked across Reddit) — log at ERROR, surface in `scheduler_runs`, and **don't increment per-source counters for that batch**. Avoids auto-disabling 10 subreddits because of an hour-long UA issue. Annotate the 50% threshold:
+  ```python
+  # heuristic 2026-05-18 — UA-block detection: if >50% of sources in one
+  # batch return 403, treat as global block. Don't increment per-source
+  # counters or auto-disable; the issue is our UA, not the subs.
+  _UA_BLOCK_BATCH_FRACTION = 0.5
+  ```
 
 ### Logging
 
@@ -66,6 +73,18 @@ Apply the verify-constants convention from CLAUDE.md (both `# verified` and `# h
 - **Unit tests** mock `httpx.Client` against `tests/fixtures/reddit/listing_*.json` captures. Verify dedup, deletion-tagging, three-strikes counter logic, UA format, rate-limit acquire calls.
 - **Schema contract test** (per the new convention from feedback 009): `tests/unit/test_reddit_schema_contract.py` asserts the fields the ingester depends on (`kind`, `data.children[].data.{id, subreddit, title, selftext, score, num_comments, created_utc, permalink, url}`). Fails loudly if a fixture refresh shows Reddit changed the response shape.
 - **Integration test** (`@pytest.mark.integration`, gated on internet access) hits one real subreddit, captures the response into `tests/fixtures/reddit/` for use by unit tests.
+- **Fixture meta header** (per feedback 010 Q1): every captured fixture starts with a `_fixture_meta` field:
+  ```json
+  {
+    "_fixture_meta": {
+      "captured": "2026-05-18",
+      "refreshed": "2026-08-12 — Reddit added media_metadata field; updated contract assertions to match",
+      "source": "GET https://www.reddit.com/r/programming/.json"
+    },
+    ...
+  }
+  ```
+  Strip `_fixture_meta` in tests before parsing (same pattern as `_meta_note` on the Anthropic fixture). The three-line audit trail makes "why did this fixture change?" answerable without git archaeology.
 
 ### Bootstrap
 
