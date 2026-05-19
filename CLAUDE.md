@@ -114,6 +114,15 @@ Append-only, one line per request:
 
 Status values: `open` (request submitted, no feedback yet), `answered` (feedback received and applied).
 
+## Git workflow
+
+**Branch per task.** Direct commits to `main` are reserved for repo-wide infra (initial scaffold, hotfixes the human explicitly authorizes). Everything else lands via PR.
+
+- Branch name: `feature/task-NNN-short-slug` (matches `docs/tasks/NNN-*.md`). For non-task work (a feedback fold that doesn't map to a numbered task), use `feature/feedback-NNN-applied` or `feature/<descriptive-slug>`.
+- Orchestrator request and feedback files commit on the same branch as the work they belong to — the PR becomes the canonical place for "what did this task decide?" archaeology.
+- Open the PR when the task is ready for review. The human merges. Task 023's CI (when live) runs on PRs.
+- Don't push to `main` directly even if access allows it. The branch+PR cadence is the rule; classifier blocks are the guardrail enforcing it.
+
 ## Project conventions
 
 - Python 3.11+. Format with `ruff format`, lint with `ruff check`, type-check with `pyright` (strict on `apfun/`).
@@ -190,3 +199,4 @@ Status values: `open` (request submitted, no feedback yet), `answered` (feedback
 - 2026-05-18: External integrations have three distinct protection mechanisms by what changes. VALUES (rate limits, prices, model IDs) → `# verified`/`# heuristic` annotations. SCHEMA SHAPES from third-party APIs (Reddit, ProductHunt GraphQL, G2/Capterra HTML) → contract tests at `tests/unit/test_<source>_schema_contract.py` against captured fixtures. SDK-SHIPPED MODELS (`anthropic.types.Message`) → tripwire tests with `model_validate` against captured response. Pick the mechanism by what changes.
 - 2026-05-18: `DEFAULT_THINKING_BUDGET` retune triggers — first of: 50 rows in `llm_runs` for any single task, a `judge()` call hitting its budget warning (>90% of budget used), or 10 `synthesize` calls. When any fires, open an orchestrator request with `llm_runs` aggregates — don't tune silently.
 - 2026-05-18: `JUDGMENT_TASKS` membership is semantically anchored to `project-brief.md` §3, not to "things I added LLM calls for so far." Anything involving niche evaluation, competitor analysis, prioritization, or "is this opportunity real" belongs in the set as it materializes.
+- 2026-05-19: Branch per task (`feature/task-NNN-...`). Don't push to `main` even if access allows it — PRs give changes a moment to be visible before permanent, are the natural place to attach orchestrator request/feedback files, and play nicely with the task 023 CI gate. The classifier block on direct-to-main pushes is the guardrail enforcing this; see "Git workflow" in this file.

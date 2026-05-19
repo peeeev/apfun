@@ -1,0 +1,88 @@
+{
+  "_fixture_meta": {
+    "captured": "2026-05-19 — synthetic seed; awaiting real capture via scripts/capture_reddit_fixture.py",
+    "refreshed": null,
+    "source": "GET https://www.reddit.com/r/SaaS/new.json?limit=100"
+  },
+  "kind": "Listing",
+  "data": {
+    "after": "t3_abc4",
+    "before": null,
+    "modhash": "",
+    "geo_filter": "",
+    "children": [
+      {
+        "kind": "t3",
+        "data": {
+          "id": "abc1",
+          "subreddit": "SaaS",
+          "subreddit_id": "t5_2qhol",
+          "title": "What billing tool do you wish existed for early-stage SaaS?",
+          "selftext": "Stripe is fine for cards but everything else is a mess — proration, dunning, anything per-seat. Curious what other founders have wired together.",
+          "author": "user_one",
+          "score": 42,
+          "num_comments": 15,
+          "created_utc": 1747699000.0,
+          "permalink": "/r/SaaS/comments/abc1/what_billing_tool/",
+          "url": "https://www.reddit.com/r/SaaS/comments/abc1/what_billing_tool/",
+          "is_self": true,
+          "over_18": false
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "id": "abc2",
+          "subreddit": "SaaS",
+          "subreddit_id": "t5_2qhol",
+          "title": "Cancelling — burned out, 2 years in",
+          "selftext": "[deleted]",
+          "author": "[deleted]",
+          "score": 7,
+          "num_comments": 3,
+          "created_utc": 1747698000.0,
+          "permalink": "/r/SaaS/comments/abc2/cancelling_burned_out/",
+          "url": "https://www.reddit.com/r/SaaS/comments/abc2/cancelling_burned_out/",
+          "is_self": true,
+          "over_18": false
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "id": "abc3",
+          "subreddit": "SaaS",
+          "subreddit_id": "t5_2qhol",
+          "title": "Removed thread — moderator action",
+          "selftext": "[removed]",
+          "author": "user_three",
+          "score": 0,
+          "num_comments": 0,
+          "created_utc": 1747697000.0,
+          "permalink": "/r/SaaS/comments/abc3/removed_thread/",
+          "url": "https://www.reddit.com/r/SaaS/comments/abc3/removed_thread/",
+          "is_self": true,
+          "over_18": false
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "id": "abc4",
+          "subreddit": "SaaS",
+          "subreddit_id": "t5_2qhol",
+          "title": "Anyone running self-hosted analytics? PostHog vs Plausible vs ... ?",
+          "selftext": "Want the dashboards without the GA4 mess. Trade-offs?",
+          "author": "user_four",
+          "score": 18,
+          "num_comments": 9,
+          "created_utc": 1747696000.0,
+          "permalink": "/r/SaaS/comments/abc4/self_hosted_analytics/",
+          "url": "https://www.reddit.com/r/SaaS/comments/abc4/self_hosted_analytics/",
+          "is_self": true,
+          "over_18": false
+        }
+      }
+    ]
+  }
+}

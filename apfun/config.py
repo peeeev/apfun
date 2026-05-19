@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     port: int = 4000
     db_url: str = "sqlite:///data/apfun.db"
     anthropic_api_key: str = ""
+    reddit_username: str = ""
 
     @field_validator("host")
     @classmethod
@@ -21,6 +22,22 @@ class Settings(BaseSettings):
                 "from the host at 0.0.0.0:4000 (see CLAUDE.md → Networking). Use 0.0.0.0."
             )
         return v
+
+    @field_validator("reddit_username", mode="after")
+    @classmethod
+    def _validate_reddit_username(cls, v: str) -> str:
+        # Fail-loud at Settings() construction — Reddit silently blocks
+        # non-conformant User-Agents, so phantom-empty fetches are worse than
+        # a crash. Per docs/tasks/005-reddit-ingester.md → Config and
+        # orchestrator feedback 011 Q1.
+        if not v or not v.strip():
+            raise ValueError(
+                "APFUN_REDDIT_USERNAME is required. Reddit silently blocks "
+                "non-conformant User-Agents — an empty username produces "
+                "phantom-empty results, not errors. Set the env var to your "
+                "Reddit handle. See CLAUDE.md → Networking for context."
+            )
+        return v.strip()
 
 
 settings = Settings()
