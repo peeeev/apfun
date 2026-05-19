@@ -1,0 +1,116 @@
+{
+  "_fixture_meta": {
+    "captured": "2026-05-19 — synthetic seed; awaiting real capture via scripts/capture_producthunt_fixture.py",
+    "refreshed": null,
+    "source": "POST https://api.producthunt.com/v2/api/graphql posts(first: 20, topic: \"developer-tools\")"
+  },
+  "data": {
+    "posts": {
+      "pageInfo": {
+        "endCursor": "cursor_synthetic_004",
+        "hasNextPage": false
+      },
+      "edges": [
+        {
+          "cursor": "cursor_synthetic_001",
+          "node": {
+            "id": "555001",
+            "slug": "tiny-observability-for-saas",
+            "name": "Tiny Observability",
+            "tagline": "One-binary observability stack for indie SaaS",
+            "description": "Drop-in metrics + traces + logs for a single host. SQLite-backed.",
+            "url": "https://www.producthunt.com/posts/tiny-observability-for-saas",
+            "votesCount": 245,
+            "commentsCount": 31,
+            "featuredAt": "2026-05-18T16:00:00Z",
+            "topics": {
+              "edges": [
+                {"node": {"name": "Developer Tools", "slug": "developer-tools"}},
+                {"node": {"name": "Productivity", "slug": "productivity"}}
+              ]
+            },
+            "makers": {
+              "edges": [
+                {"node": {"username": "shipper_alpha"}}
+              ]
+            }
+          }
+        },
+        {
+          "cursor": "cursor_synthetic_002",
+          "node": {
+            "id": "555002",
+            "slug": "stripe-billing-helper",
+            "name": "Stripe Billing Helper",
+            "tagline": "Make Stripe billing less of a nightmare",
+            "description": "Proration, dunning, mid-cycle changes — opinionated wrapper.",
+            "url": "https://www.producthunt.com/posts/stripe-billing-helper",
+            "votesCount": 88,
+            "commentsCount": 14,
+            "featuredAt": "2026-05-18T14:00:00Z",
+            "topics": {
+              "edges": [
+                {"node": {"name": "Developer Tools", "slug": "developer-tools"}},
+                {"node": {"name": "Payments", "slug": "payments"}}
+              ]
+            },
+            "makers": {
+              "edges": [
+                {"node": {"username": "shipper_beta"}}
+              ]
+            }
+          }
+        },
+        {
+          "cursor": "cursor_synthetic_003",
+          "node": {
+            "id": "555003",
+            "slug": "self-hosted-linear-alt",
+            "name": "Issuely",
+            "tagline": "Self-hosted alternative to Linear",
+            "description": "Plain markdown issues + kanban view. No Jira DNA.",
+            "url": "https://www.producthunt.com/posts/self-hosted-linear-alt",
+            "votesCount": 17,
+            "commentsCount": 4,
+            "featuredAt": "2026-05-18T12:00:00Z",
+            "topics": {
+              "edges": [
+                {"node": {"name": "Developer Tools", "slug": "developer-tools"}},
+                {"node": {"name": "Productivity", "slug": "productivity"}}
+              ]
+            },
+            "makers": {
+              "edges": [
+                {"node": {"username": "shipper_gamma"}}
+              ]
+            }
+          }
+        },
+        {
+          "cursor": "cursor_synthetic_004",
+          "node": {
+            "id": "555004",
+            "slug": "low-signal-launch",
+            "name": "Yet Another Notes App",
+            "tagline": "Notes, but make it AI",
+            "description": "Notes app with sprinkled AI features.",
+            "url": "https://www.producthunt.com/posts/low-signal-launch",
+            "votesCount": 3,
+            "commentsCount": 0,
+            "featuredAt": "2026-05-18T11:00:00Z",
+            "topics": {
+              "edges": [
+                {"node": {"name": "Productivity", "slug": "productivity"}}
+              ]
+            },
+            "makers": {
+              "edges": [
+                {"node": {"username": "shipper_delta"}}
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
