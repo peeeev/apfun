@@ -1,7 +1,7 @@
-"""Seed the `sources` table with the brief's core subreddits + vertical placeholders.
+"""Seed the `sources` table with the brief's core subreddits + HN query sets + verticals.
 
 Idempotent: re-running is safe — existing sources (by (kind, name)) are skipped
-rather than duplicated. Run once after `make init-db` to bootstrap Reddit ingest.
+rather than duplicated. Run once after `make init-db` to bootstrap ingest.
 
 Usage::
 
@@ -10,7 +10,10 @@ Usage::
 
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from apfun.db import SessionLocal
 from apfun.models import Source
@@ -38,8 +41,38 @@ _VERTICAL_SUBS = [
     "freelance",
 ]
 
+# HN query bundles — opportunity-revealing phrasings from the task 006 spec.
+# Each entry becomes one Source row; the source's queries run in sequence in
+# a single `ingest()` call.
+_HN_QUERY_BUNDLES: list[tuple[str, list[str]]] = [
+    (
+        "hn:wishes",
+        [
+            "tool you wish existed",
+            "I wish there were",
+            "what software is missing",
+        ],
+    ),
+    (
+        "hn:ask-hn",
+        [
+            "Ask HN: what tool",
+            "Ask HN: what SaaS",
+            "Ask HN: what software",
+        ],
+    ),
+    (
+        "hn:alternatives",
+        [
+            "alternatives to",
+            "self-hosted alternative to",
+            "open source alternative to",
+        ],
+    ),
+]
 
-def _ensure_source(session, name: str) -> bool:  # type: ignore[no-untyped-def]
+
+def _ensure_reddit_source(session: Session, name: str) -> bool:
     existing = session.execute(
         select(Source).where(Source.kind == "reddit", Source.name == f"r/{name}")
     ).scalar_one_or_none()
@@ -56,12 +89,33 @@ def _ensure_source(session, name: str) -> bool:  # type: ignore[no-untyped-def]
     return True
 
 
+def _ensure_hn_source(session: Session, name: str, queries: list[str]) -> bool:
+    existing = session.execute(
+        select(Source).where(Source.kind == "hn", Source.name == name)
+    ).scalar_one_or_none()
+    if existing is not None:
+        return False
+    config: dict[str, Any] = {
+        "queries": queries,
+        "since_hours": 24,
+        "min_story_points": 3,
+        "min_comment_points": 1,
+    }
+    session.add(Source(kind="hn", name=name, config_json=config, is_active=True))
+    return True
+
+
 def main() -> int:
     inserted = 0
     skipped = 0
     with SessionLocal() as session:
         for name in _CORE_SUBS + _VERTICAL_SUBS:
-            if _ensure_source(session, name):
+            if _ensure_reddit_source(session, name):
+                inserted += 1
+            else:
+                skipped += 1
+        for name, queries in _HN_QUERY_BUNDLES:
+            if _ensure_hn_source(session, name, queries):
                 inserted += 1
             else:
                 skipped += 1

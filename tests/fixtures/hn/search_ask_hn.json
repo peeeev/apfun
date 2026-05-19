@@ -1,0 +1,75 @@
+{
+  "_fixture_meta": {
+    "captured": "2026-05-19 — synthetic seed; awaiting real capture via scripts/capture_hn_fixture.py",
+    "refreshed": null,
+    "source": "GET https://hn.algolia.com/api/v1/search_by_date?query=tool+you+wish+existed&tags=(story,comment)"
+  },
+  "hits": [
+    {
+      "objectID": "44000001",
+      "title": "Ask HN: What developer tool do you wish existed?",
+      "story_text": "I'm sick of cobbling together five different services to get usable observability for a small SaaS. What's the missing piece for you?",
+      "url": null,
+      "author": "founder_one",
+      "points": 64,
+      "num_comments": 87,
+      "created_at": "2026-05-18T22:14:00.000Z",
+      "created_at_i": 1747699000,
+      "_tags": ["story", "ask_hn", "author_founder_one"],
+      "comment_text": null,
+      "story_id": null,
+      "story_title": null
+    },
+    {
+      "objectID": "44000002",
+      "title": "Show HN: tiny alternative to Datadog for indie SaaS",
+      "story_text": null,
+      "url": "https://example.com/show-hn",
+      "author": "shipper_two",
+      "points": 12,
+      "num_comments": 7,
+      "created_at": "2026-05-18T20:00:00.000Z",
+      "created_at_i": 1747692000,
+      "_tags": ["story", "show_hn", "author_shipper_two"],
+      "comment_text": null,
+      "story_id": null,
+      "story_title": null
+    },
+    {
+      "objectID": "44000003",
+      "title": null,
+      "story_text": null,
+      "url": null,
+      "author": "commenter_three",
+      "points": 4,
+      "num_comments": 0,
+      "created_at": "2026-05-18T19:30:00.000Z",
+      "created_at_i": 1747690200,
+      "_tags": ["comment", "author_commenter_three", "story_44000001"],
+      "comment_text": "I wish there were a self-hosted alternative to Linear that didn't feel like a Jira fork. Plain markdown issues plus a kanban view; that's it.",
+      "story_id": 44000001,
+      "story_title": "Ask HN: What developer tool do you wish existed?"
+    },
+    {
+      "objectID": "44000004",
+      "title": "Low-points story about CRMs",
+      "story_text": "Anyone tried building a CRM from scratch in 2026?",
+      "url": null,
+      "author": "lonely_poster",
+      "points": 1,
+      "num_comments": 0,
+      "created_at": "2026-05-18T18:45:00.000Z",
+      "created_at_i": 1747687500,
+      "_tags": ["story", "author_lonely_poster"],
+      "comment_text": null,
+      "story_id": null,
+      "story_title": null
+    }
+  ],
+  "nbHits": 4,
+  "page": 0,
+  "nbPages": 1,
+  "hitsPerPage": 20,
+  "query": "tool you wish existed",
+  "params": "advancedSyntax=true&analytics=false&query=tool%20you%20wish%20existed&tags=(story%2Ccomment)"
+}
