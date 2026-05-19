@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from apfun.config import settings
 from apfun.models import RawSignal, Source
+from apfun.sourcing import _base as base_module
 from apfun.sourcing import producthunt as ph_module
 from apfun.sourcing.producthunt import ingest
 
@@ -238,7 +239,7 @@ def test_terminal_status_returns_without_retry(
     ph_token: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(ph_module.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(base_module.time, "sleep", lambda _s: None)
     client = _make_mock_client(status=401, body={})
     result = ingest(session, ph_source, client=client)
     assert result.status_codes == [401]
@@ -252,11 +253,11 @@ def test_transient_5xx_retries_then_gives_up(
     ph_token: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(ph_module.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(base_module.time, "sleep", lambda _s: None)
     client = _make_mock_client(status=503, body={})
     result = ingest(session, ph_source, client=client)
     assert result.status_codes == [503]
-    assert client.post.call_count == ph_module._MAX_RETRIES
+    assert client.post.call_count == base_module.MAX_RETRIES
 
 
 def test_content_hash_uses_slug() -> None:

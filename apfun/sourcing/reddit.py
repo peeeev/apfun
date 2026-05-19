@@ -1,12 +1,10 @@
 """Reddit ingester — pulls recent posts from configured subreddits into `raw_signals`.
 
-Architecture (per orchestrator feedback 011 Q2):
-- `ingest(session, source) -> IngestResult` is per-source and dumb. It captures rows,
-  observes per-listing HTTP status codes, and reports back. It does NOT mutate
-  `source.consecutive_failures` directly.
-- `ingest_batch(session, sources) -> list[IngestResult]` is the batch-aware wrapper.
-  It tallies status codes across results, applies the UA-block guard, decides per-
-  source counter increments + auto-disable, and writes the `scheduler_runs` row.
+Shared retry / batch / counter logic lives in `apfun.sourcing._base` (extracted
+from this module + hn.py + producthunt.py after three implementations made the
+right shape clear). What stays here is Reddit-specific: URL template, content-
+hash inputs, capture-but-tag deletion handling, UA-format requirement, and the
+UA-block batch guard.
 
 See `docs/tasks/005-reddit-ingester.md` for the full spec.
 """
@@ -15,9 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import random
 import time
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -26,7 +22,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from apfun.config import settings
-from apfun.models import RawSignal, SchedulerRun, Source
+from apfun.models import RawSignal, Source
+from apfun.sourcing._base import (
+    IngestResult,
+    apply_default_health_update,
+    run_ingest_batch,
+    run_with_retry,
+)
 from apfun.sourcing._rate_limit import TokenBucket
 
 logger = logging.getLogger(__name__)
@@ -68,28 +70,6 @@ _UA_BLOCK_BATCH_FRACTION = 0.5
 # failures. Three consecutive terminal-status fetches → auto-disable.
 _AUTO_DISABLE_THRESHOLD = 3
 
-# heuristic 2026-05-19 — three retries with exponential backoff (1s, 2s, 4s)
-# for transient HTTP errors. Implemented inline; will refactor when task 007
-# (ProductHunt) is the third call site and the abstraction shape is clear.
-_MAX_RETRIES = 3
-_RETRY_BASE_DELAY_S = 1.0
-
-
-@dataclass
-class IngestResult:
-    """Per-source outcome reported by `ingest()` to the batch wrapper.
-
-    `status_codes` is a list because one source may issue multiple listing
-    calls per ingest (multi-subreddit configs). The batch wrapper flattens
-    across results to compute the UA-block fraction.
-    """
-
-    source_id: int
-    items_captured: int
-    status_codes: list[int] = field(default_factory=lambda: list[int]())
-    error_class: str | None = None
-    latency_ms: int = 0
-
 
 def _content_hash(subreddit: str, external_id: str, title: str, body: str) -> str:
     body_slice = body[:500]
@@ -108,33 +88,17 @@ def _classify_deletion(body: str) -> tuple[bool, str | None]:
 def _fetch_listing(
     client: httpx.Client, subreddit: str, fetch_kind: str
 ) -> tuple[int, dict[str, Any] | None, str | None]:
-    """Fetch a single listing with retry-on-transient-error. Returns (status, body, error_class).
-
-    On terminal statuses (403/404/410), returns immediately — no retry.
-    On 5xx/429/timeout/connect-error, retries up to `_MAX_RETRIES` with
-    exponential backoff. Returns the *final* attempt's outcome.
-    """
+    """Fetch a single Reddit listing with retry. Returns (status, body, error_class)."""
     url = _LISTING_URL_TEMPLATE.format(subreddit=subreddit, kind=fetch_kind)
-    last_status = 0
-    last_error: str | None = None
-    for attempt in range(_MAX_RETRIES):
-        _BUCKET.acquire()
-        try:
-            resp = client.get(url, headers={"User-Agent": _USER_AGENT}, timeout=30.0)
-            last_status = resp.status_code
-            if resp.status_code in TERMINAL_STATUSES:
-                return resp.status_code, None, None
-            if 500 <= resp.status_code < 600 or resp.status_code == 429:
-                last_error = f"HTTP {resp.status_code}"
-            else:
-                resp.raise_for_status()
-                return resp.status_code, resp.json(), None
-        except httpx.HTTPError as exc:
-            last_error = type(exc).__name__
-        if attempt < _MAX_RETRIES - 1:
-            delay = _RETRY_BASE_DELAY_S * (2**attempt) + random.uniform(0, 0.1)
-            time.sleep(delay)
-    return last_status, None, last_error
+
+    def _request() -> httpx.Response:
+        return client.get(url, headers={"User-Agent": _USER_AGENT}, timeout=30.0)
+
+    return run_with_retry(
+        _request,
+        terminal_statuses=TERMINAL_STATUSES,
+        bucket_acquire=_BUCKET.acquire,
+    )
 
 
 def ingest(
@@ -142,7 +106,7 @@ def ingest(
     source: Source,
     client: httpx.Client | None = None,
 ) -> IngestResult:
-    """Capture posts for one Reddit source. Returns an IngestResult; does NOT mutate counters."""
+    """Capture posts for one Reddit source. Returns IngestResult; does NOT mutate counters."""
     started = time.monotonic()
     config = source.config_json or {}
     subreddits: list[str] = list(config.get("subreddits", []))
@@ -165,7 +129,7 @@ def ingest(
             status_codes.append(status)
             if err and error_class is None:
                 error_class = err
-            log_record = {
+            log_record: dict[str, Any] = {
                 "subreddit": subreddit,
                 "status_code": status,
                 "items_returned": 0
@@ -240,78 +204,6 @@ def _insert_signal(session: Session, source: Source, subreddit: str, row: dict[s
     return True
 
 
-def ingest_batch(
-    session: Session,
-    sources: list[Source],
-    job_id: str = "reddit.ingest_batch",
-    client: httpx.Client | None = None,
-) -> list[IngestResult]:
-    """Run ingest() across sources; apply UA-block guard + three-strikes auto-disable.
-
-    Writes one `scheduler_runs` row summarizing the batch. Per-source counter
-    updates happen here, not inside `ingest()` — see orchestrator feedback 011 Q2.
-    """
-    started_at = datetime.now(UTC)
-    owned_client = client is None
-    if client is None:
-        client = httpx.Client()
-
-    results: list[IngestResult] = []
-    batch_error: str | None = None
-    try:
-        for source in sources:
-            try:
-                result = ingest(session, source, client=client)
-                results.append(result)
-                source.last_fetched_at = datetime.now(UTC)
-            except Exception as exc:  # noqa: BLE001 — capture so batch keeps going
-                logger.exception("reddit.ingest failed for source_id=%s", source.id)
-                results.append(
-                    IngestResult(
-                        source_id=source.id,
-                        items_captured=0,
-                        status_codes=[],
-                        error_class=type(exc).__name__,
-                    )
-                )
-                if batch_error is None:
-                    batch_error = type(exc).__name__
-
-        ua_blocked = _detect_ua_block(results)
-        if ua_blocked:
-            logger.error(
-                "reddit.ua_block_detected",
-                extra={
-                    "reddit_ua_block": {
-                        "batch_size": len(results),
-                        "fraction_403": _fraction_403(results),
-                    }
-                },
-            )
-
-        for source, result in zip(sources, results, strict=True):
-            _apply_health_update(source, result, ua_blocked=ua_blocked)
-
-        session.commit()
-    finally:
-        if owned_client:
-            client.close()
-
-    finished_at = datetime.now(UTC)
-    session.add(
-        SchedulerRun(
-            job_id=job_id,
-            started_at=started_at,
-            finished_at=finished_at,
-            ok=batch_error is None,
-            error=batch_error,
-            items_processed=sum(r.items_captured for r in results),
-        )
-    )
-    session.commit()
-    return results
-
-
 def _fraction_403(results: list[IngestResult]) -> float:
     sources_with_status = [r for r in results if r.status_codes]
     if not sources_with_status:
@@ -324,43 +216,53 @@ def _detect_ua_block(results: list[IngestResult]) -> bool:
     return _fraction_403(results) > _UA_BLOCK_BATCH_FRACTION
 
 
-def _apply_health_update(source: Source, result: IngestResult, *, ua_blocked: bool) -> None:
-    """Update `consecutive_failures` and `is_active` based on the result.
-
-    Rules:
-    - UA-blocked batch: don't touch per-source counters at all.
-    - Any successful fetch (200 response present in status_codes): reset counter.
-    - Any terminal-status (403/404/410) without a success in the same source:
-      increment. If counter hits `_AUTO_DISABLE_THRESHOLD`, set is_active=False.
-    - Transient errors (5xx, 429, timeout, no status_codes at all): leave the
-      counter alone — they're about us or Reddit, not about the sub being dead.
-    """
+def _apply_batch_health_updates(sources: list[Source], results: list[IngestResult]) -> None:
+    """Reddit's batch health update: skip increments entirely when UA-block fires."""
+    ua_blocked = _detect_ua_block(results)
     if ua_blocked:
-        return
-    if not result.status_codes:
-        return
+        logger.error(
+            "reddit.ua_block_detected",
+            extra={
+                "reddit_ua_block": {
+                    "batch_size": len(results),
+                    "fraction_403": _fraction_403(results),
+                }
+            },
+        )
+        return  # don't touch per-source counters under global UA block
 
-    saw_success = any(200 <= s < 300 for s in result.status_codes)
-    saw_terminal = any(s in TERMINAL_STATUSES for s in result.status_codes)
+    for source, result in zip(sources, results, strict=True):
+        apply_default_health_update(
+            source,
+            result,
+            terminal_statuses=TERMINAL_STATUSES,
+            threshold=_AUTO_DISABLE_THRESHOLD,
+            logger=logger,
+            source_kind="reddit",
+        )
 
-    if saw_success:
-        source.consecutive_failures = 0
-        return
-    if saw_terminal:
-        source.consecutive_failures += 1
-        if source.consecutive_failures >= _AUTO_DISABLE_THRESHOLD:
-            source.is_active = False
-            logger.warning(
-                "reddit.source_auto_disabled",
-                extra={
-                    "reddit_auto_disable": {
-                        "source_id": source.id,
-                        "source_name": source.name,
-                        "consecutive_failures": source.consecutive_failures,
-                        "status_codes": result.status_codes,
-                    }
-                },
-            )
+
+def ingest_batch(
+    session: Session,
+    sources: list[Source],
+    job_id: str = "reddit.ingest_batch",
+    client: httpx.Client | None = None,
+) -> list[IngestResult]:
+    """Run ingest() across sources; apply UA-block guard + three-strikes auto-disable.
+
+    The outer batch loop, scheduler_runs write, and exception capture live in
+    `apfun.sourcing._base.run_ingest_batch`; this function just supplies the
+    Reddit-specific per-source `ingest` and the UA-block-aware health updater.
+    """
+    return run_ingest_batch(
+        session,
+        sources,
+        job_id=job_id,
+        client=client,
+        ingest_fn=ingest,
+        apply_health_updates=_apply_batch_health_updates,
+        logger=logger,
+    )
 
 
 __all__ = [

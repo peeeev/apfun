@@ -1,9 +1,9 @@
 """ProductHunt ingester (GraphQL v2 API).
 
-Third call site for the per-source ingester pattern — see orchestrator
-feedback 013 Q1. This module intentionally duplicates the shape of
-`apfun.sourcing.reddit` and `apfun.sourcing.hn`; the unification refactor PR
-follows this task's merge (per feedback 013 action item #4).
+Shared retry / batch / counter logic lives in `apfun.sourcing._base`. This
+module owns the ProductHunt-specific bits: GraphQL POST + cursor paging,
+Bearer-token auth, topic fan-out vs leaderboard single-query, vote-count
+filtering, and the missing-token clean-no-op path.
 
 ProductHunt-specific differences vs Reddit/HN:
 - **GraphQL endpoint** with cursor paging (`posts(first: N, after: <cursor>)`),
@@ -12,7 +12,7 @@ ProductHunt-specific differences vs Reddit/HN:
   (read-only, long-lived) per feedback 013 Q2.
 - **Missing-token path is a clean no-op**, not a crash. ProductHunt 401s with a
   loud message when the token is bad, so we fail at the call site (per the
-  new "Auth secret discipline" convention) — but for the *missing* case the
+  "Auth secret discipline" convention) — but for the *missing* case the
   ingester returns an empty `IngestResult` with `error_class="missing_token"`
   and lets the batch wrapper write an "ok=True / items_processed=0"
   scheduler_runs row so the scheduler keeps marching while an operator
@@ -26,10 +26,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import random
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -38,7 +36,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from apfun.config import settings
-from apfun.models import RawSignal, SchedulerRun, Source
+from apfun.models import RawSignal, Source
+from apfun.sourcing._base import (
+    IngestResult,
+    apply_default_health_update,
+    run_ingest_batch,
+    run_with_retry,
+)
 from apfun.sourcing._rate_limit import TokenBucket
 
 logger = logging.getLogger(__name__)
@@ -56,12 +60,6 @@ _BUCKET = TokenBucket(rate_per_sec=1.0, burst=2)
 # top-level auth/permission errors. 401 = token revoked/invalid; 403 = quota
 # exhausted or scope-forbidden; 404 = wrong endpoint path.
 TERMINAL_STATUSES: frozenset[int] = frozenset({401, 403, 404})
-
-# heuristic 2026-05-19 — three retries with exponential backoff. Inline rather
-# than shared with reddit.py/hn.py; behavior-preserving refactor PR follows this
-# task per feedback 013.
-_MAX_RETRIES = 3
-_RETRY_BASE_DELAY_S = 1.0
 
 # heuristic 2026-05-19 — balances responsiveness against transient single-day
 # failures. Same threshold as Reddit and HN.
@@ -101,22 +99,6 @@ query Posts($first: Int!, $after: String, $featuredAfter: DateTime, $topic: Stri
 """.strip()
 
 
-@dataclass
-class IngestResult:
-    """Per-source outcome reported by ProductHunt `ingest()` to the batch wrapper.
-
-    Same shape as `apfun.sourcing.reddit.IngestResult` and
-    `apfun.sourcing.hn.IngestResult` — deliberate duplication until task 007's
-    behavior-preserving refactor unifies them.
-    """
-
-    source_id: int
-    items_captured: int
-    status_codes: list[int] = field(default_factory=lambda: list[int]())
-    error_class: str | None = None
-    latency_ms: int = 0
-
-
 def _content_hash(slug: str) -> str:
     return hashlib.sha256(slug.encode("utf-8")).hexdigest()
 
@@ -149,33 +131,22 @@ def _fetch_posts(
     token: str,
     variables: dict[str, Any],
 ) -> tuple[int, dict[str, Any] | None, str | None]:
-    """Execute one GraphQL query. Returns (status, body, error_class)."""
+    """Execute one GraphQL query. Delegates retry/terminal handling to `_base`."""
     body: dict[str, Any] = {"query": _POSTS_QUERY, "variables": variables}
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    last_status = 0
-    last_error: str | None = None
-    for attempt in range(_MAX_RETRIES):
-        _BUCKET.acquire()
-        try:
-            resp = client.post(_GRAPHQL_URL, json=body, headers=headers, timeout=30.0)
-            last_status = resp.status_code
-            if resp.status_code in TERMINAL_STATUSES:
-                return resp.status_code, None, None
-            if 500 <= resp.status_code < 600 or resp.status_code == 429:
-                last_error = f"HTTP {resp.status_code}"
-            else:
-                resp.raise_for_status()
-                return resp.status_code, resp.json(), None
-        except httpx.HTTPError as exc:
-            last_error = type(exc).__name__
-        if attempt < _MAX_RETRIES - 1:
-            delay = _RETRY_BASE_DELAY_S * (2**attempt) + random.uniform(0, 0.1)
-            time.sleep(delay)
-    return last_status, None, last_error
+
+    def _request() -> httpx.Response:
+        return client.post(_GRAPHQL_URL, json=body, headers=headers, timeout=30.0)
+
+    return run_with_retry(
+        _request,
+        terminal_statuses=TERMINAL_STATUSES,
+        bucket_acquire=_BUCKET.acquire,
+    )
 
 
 def ingest(
@@ -322,6 +293,26 @@ def _insert_signal(session: Session, source: Source, surface: str, node: dict[st
     return True
 
 
+def _apply_batch_health_updates(sources: list[Source], results: list[IngestResult]) -> None:
+    """ProductHunt's batch health update: skip the missing-token rows.
+
+    Missing token is an operator config issue, not a runtime fault — the
+    scheduler keeps marching while the operator notices the WARNING + zero-row
+    `scheduler_runs` row. Per-source counters stay at their current value.
+    """
+    for source, result in zip(sources, results, strict=True):
+        if result.error_class == "missing_token":
+            continue
+        apply_default_health_update(
+            source,
+            result,
+            terminal_statuses=TERMINAL_STATUSES,
+            threshold=_AUTO_DISABLE_THRESHOLD,
+            logger=logger,
+            source_kind="producthunt",
+        )
+
+
 def ingest_batch(
     session: Session,
     sources: list[Source],
@@ -332,93 +323,17 @@ def ingest_batch(
 
     Missing-token results contribute a clean "ok=True" scheduler_runs row —
     `error_class="missing_token"` does NOT increment per-source counters
-    (it's an operator config issue, not a runtime fault of the source).
+    (it's an operator config issue, not a runtime fault).
     """
-    started_at = datetime.now(UTC)
-    owned_client = client is None
-    if client is None:
-        client = httpx.Client()
-
-    results: list[IngestResult] = []
-    batch_error: str | None = None
-    try:
-        for source in sources:
-            try:
-                result = ingest(session, source, client=client)
-                results.append(result)
-                source.last_fetched_at = datetime.now(UTC)
-            except Exception as exc:  # noqa: BLE001 — keep the batch going
-                logger.exception("producthunt.ingest failed for source_id=%s", source.id)
-                results.append(
-                    IngestResult(
-                        source_id=source.id,
-                        items_captured=0,
-                        status_codes=[],
-                        error_class=type(exc).__name__,
-                    )
-                )
-                if batch_error is None:
-                    batch_error = type(exc).__name__
-
-        for source, result in zip(sources, results, strict=True):
-            _apply_health_update(source, result)
-
-        session.commit()
-    finally:
-        if owned_client:
-            client.close()
-
-    finished_at = datetime.now(UTC)
-    session.add(
-        SchedulerRun(
-            job_id=job_id,
-            started_at=started_at,
-            finished_at=finished_at,
-            ok=batch_error is None,
-            error=batch_error,
-            items_processed=sum(r.items_captured for r in results),
-        )
+    return run_ingest_batch(
+        session,
+        sources,
+        job_id=job_id,
+        client=client,
+        ingest_fn=ingest,
+        apply_health_updates=_apply_batch_health_updates,
+        logger=logger,
     )
-    session.commit()
-    return results
-
-
-def _apply_health_update(source: Source, result: IngestResult) -> None:
-    """Update `consecutive_failures` and `is_active` based on the result.
-
-    Rules:
-    - `error_class="missing_token"`: leave counter alone (operator config issue).
-    - Any successful fetch (200 response present in status_codes): reset counter.
-    - Any terminal-status (TERMINAL_STATUSES) without a same-source success:
-      increment. Counter ≥ threshold → set is_active=False.
-    - Transient errors (5xx, 429, timeout, no status_codes at all): leave the
-      counter alone.
-    """
-    if result.error_class == "missing_token":
-        return
-    if not result.status_codes:
-        return
-    saw_success = any(200 <= s < 300 for s in result.status_codes)
-    saw_terminal = any(s in TERMINAL_STATUSES for s in result.status_codes)
-
-    if saw_success:
-        source.consecutive_failures = 0
-        return
-    if saw_terminal:
-        source.consecutive_failures += 1
-        if source.consecutive_failures >= _AUTO_DISABLE_THRESHOLD:
-            source.is_active = False
-            logger.warning(
-                "producthunt.source_auto_disabled",
-                extra={
-                    "producthunt_auto_disable": {
-                        "source_id": source.id,
-                        "source_name": source.name,
-                        "consecutive_failures": source.consecutive_failures,
-                        "status_codes": result.status_codes,
-                    }
-                },
-            )
 
 
 __all__ = [
