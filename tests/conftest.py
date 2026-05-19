@@ -12,6 +12,10 @@ from pathlib import Path
 # ingester.md → Config). The test default is a sentinel handle that mirrors
 # the production UA format without claiming a real Reddit account.
 os.environ.setdefault("APFUN_REDDIT_USERNAME", "apfun_test_runner")
+# ProductHunt token is loud-failure (per CLAUDE.md → Auth secret discipline) —
+# defaults to empty, used at the call site. Tests that exercise the happy path
+# monkeypatch `settings.producthunt_token`; the missing-token test leaves the
+# default empty and asserts the no-op path. See `tests/unit/test_producthunt_*`.
 
 import pytest  # noqa: E402
 from sqlalchemy import Engine, create_engine, event  # noqa: E402

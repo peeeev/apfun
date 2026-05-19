@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     db_url: str = "sqlite:///data/apfun.db"
     anthropic_api_key: str = ""
     reddit_username: str = ""
+    producthunt_token: str = ""
 
     @field_validator("host")
     @classmethod

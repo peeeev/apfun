@@ -71,6 +71,30 @@ _HN_QUERY_BUNDLES: list[tuple[str, list[str]]] = [
     ),
 ]
 
+# ProductHunt surfaces per task 007 spec / feedback 013 heads-up:
+# - topic surface catches newer launches under specific verticals
+# - leaderboard surface catches the high-attention curated set
+_PH_SOURCES: list[tuple[str, dict[str, Any]]] = [
+    (
+        "ph:dev-tools-topic",
+        {
+            "surface": "topic",
+            "topics": ["developer-tools", "productivity"],
+            "n_days": 1,
+            "min_votes_count": 10,
+        },
+    ),
+    (
+        "ph:daily-leaderboard",
+        {
+            "surface": "leaderboard",
+            "leaderboard": "daily",
+            "n_days": 1,
+            "min_votes_count": 5,
+        },
+    ),
+]
+
 
 def _ensure_reddit_source(session: Session, name: str) -> bool:
     existing = session.execute(
@@ -105,6 +129,16 @@ def _ensure_hn_source(session: Session, name: str, queries: list[str]) -> bool:
     return True
 
 
+def _ensure_ph_source(session: Session, name: str, config: dict[str, Any]) -> bool:
+    existing = session.execute(
+        select(Source).where(Source.kind == "producthunt", Source.name == name)
+    ).scalar_one_or_none()
+    if existing is not None:
+        return False
+    session.add(Source(kind="producthunt", name=name, config_json=config, is_active=True))
+    return True
+
+
 def main() -> int:
     inserted = 0
     skipped = 0
@@ -116,6 +150,11 @@ def main() -> int:
                 skipped += 1
         for name, queries in _HN_QUERY_BUNDLES:
             if _ensure_hn_source(session, name, queries):
+                inserted += 1
+            else:
+                skipped += 1
+        for name, config in _PH_SOURCES:
+            if _ensure_ph_source(session, name, config):
                 inserted += 1
             else:
                 skipped += 1
