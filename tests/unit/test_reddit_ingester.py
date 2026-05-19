@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apfun.models import RawSignal, Source
+from apfun.sourcing import _base as base_module
 from apfun.sourcing import reddit as reddit_module
 from apfun.sourcing.reddit import ingest
 
@@ -145,8 +146,9 @@ def test_rate_limiter_acquired_per_call(
 def test_terminal_status_returns_without_retry(
     session: Session, reddit_source: Source, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Speed up: no real sleeps even if a retry path is taken.
-    monkeypatch.setattr(reddit_module.time, "sleep", lambda _s: None)
+    # Speed up: no real sleeps even if a retry path is taken. Retry sleep
+    # lives in apfun.sourcing._base after the refactor.
+    monkeypatch.setattr(base_module.time, "sleep", lambda _s: None)
     client = _make_mock_client(status=404, body={})
     result = ingest(session, reddit_source, client=client)
 
@@ -159,12 +161,12 @@ def test_terminal_status_returns_without_retry(
 def test_transient_5xx_retries_then_gives_up(
     session: Session, reddit_source: Source, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(reddit_module.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(base_module.time, "sleep", lambda _s: None)
     client = _make_mock_client(status=503, body={})
     result = ingest(session, reddit_source, client=client)
 
     assert result.status_codes == [503]
-    assert client.get.call_count == reddit_module._MAX_RETRIES
+    assert client.get.call_count == base_module.MAX_RETRIES
     # 503 is not terminal → counter stays untouched (batch layer's job anyway).
 
 

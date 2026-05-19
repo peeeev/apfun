@@ -42,7 +42,7 @@ def four_sources(session: Session) -> list[Source]:
 def _patch_ingest_with(results_by_source: dict[int, IngestResult]) -> Any:
     """Patch reddit.ingest to return canned per-source results, keyed by source.id."""
 
-    def fake_ingest(_session: Session, source: Source, **_kwargs: Any) -> IngestResult:
+    def fake_ingest(_session: Session, source: Source, *_args: Any, **_kwargs: Any) -> IngestResult:
         return results_by_source[source.id]
 
     return patch("apfun.sourcing.reddit.ingest", side_effect=fake_ingest)

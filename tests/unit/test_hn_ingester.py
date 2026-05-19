@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apfun.models import RawSignal, Source
+from apfun.sourcing import _base as base_module
 from apfun.sourcing import hn as hn_module
 from apfun.sourcing.hn import ingest
 
@@ -147,7 +148,7 @@ def test_user_agent_header_present(session: Session, hn_source: Source) -> None:
 def test_terminal_status_returns_without_retry(
     session: Session, hn_source: Source, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(hn_module.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(base_module.time, "sleep", lambda _s: None)
     client = _make_mock_client(status=400, body={})
     result = ingest(session, hn_source, client=client)
     assert result.status_codes == [400]
@@ -158,11 +159,11 @@ def test_terminal_status_returns_without_retry(
 def test_transient_5xx_retries_then_gives_up(
     session: Session, hn_source: Source, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(hn_module.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(base_module.time, "sleep", lambda _s: None)
     client = _make_mock_client(status=503, body={})
     result = ingest(session, hn_source, client=client)
     assert result.status_codes == [503]
-    assert client.get.call_count == hn_module._MAX_RETRIES
+    assert client.get.call_count == base_module.MAX_RETRIES
 
 
 def test_numeric_filter_passed_for_since_hours(session: Session, hn_source: Source) -> None:
