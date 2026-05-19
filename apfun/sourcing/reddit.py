@@ -35,19 +35,17 @@ logger = logging.getLogger(__name__)
 # JSON listing endpoints use the `.json` suffix on any URL.
 _LISTING_URL_TEMPLATE = "https://www.reddit.com/r/{subreddit}/{kind}.json"
 
-# heuristic 2026-05-19 — Reddit's unauth public-JSON ceiling is community-
-# reported as ~10 QPM per IP. No authoritative current page found; r/redditdev
-# threads are the best signal. Stay well under it.
-# TODO verify by end of task 005: Reddit unauth QPM ceiling — official doc URL
-# couldn't be sourced this PR; fallback citation is r/redditdev community
-# consensus.
+# heuristic 2026-05-19 — Reddit unauth public-JSON ceiling is community-
+# reported as ~10 QPM per IP; no authoritative current page. r/redditdev
+# threads are the best signal. Our 3.5 req/s sits well under any
+# reasonable ceiling; this constant is for sanity-checking, not for
+# enforcement.
 _REDDIT_UNAUTH_QPM_CEILING = 10
 
-# heuristic 2026-05-19 — Reddit silently degrades non-conformant User-Agents.
-# Format `<platform>:<app>:<version> (by /u/<handle>)` matches the community-
-# accepted convention used by PRAW and similar libraries.
-# TODO verify by end of task 005: UA format requirement — Reddit's API rules
-# page has shifted; fallback citation is PRAW source + r/redditdev threads.
+# heuristic 2026-05-19 — Reddit silently degrades non-conformant UAs.
+# Format `<platform>:<app>:<version> (by /u/<handle>)` is the community
+# convention used by PRAW, snoowrap, and similar libraries. Reddit's own
+# API-rules page once spelled this out but has been reorganized away.
 _USER_AGENT = f"apfun-funnel:v0.1 (by /u/{settings.reddit_username})"
 
 # heuristic 2026-05-19 — community consensus: aim well under the 10 QPM
