@@ -80,6 +80,44 @@ _IH_GROUPS: list[tuple[str, list[str]]] = [
     ("ih:ideas-and-validation", ["ideas-and-validation"]),
 ]
 
+# Review-site sources per task 009 spec / feedback 014. Each entry becomes
+# one Source row keyed by `(kind="review_sites", name="<site>:<slug>")`. Edit
+# the products list per site to track what matters; the seeds below are
+# placeholder anchors that match the synthetic fixtures.
+_REVIEW_SITE_SOURCES: list[tuple[str, dict[str, Any]]] = [
+    (
+        "g2:asana",
+        {
+            "site": "g2",
+            "products": [{"slug": "asana", "name": "Asana"}],
+            "max_pages": 3,
+            "min_star": 1,
+            "max_star": 3,
+        },
+    ),
+    (
+        "capterra:asana",
+        {
+            "site": "capterra",
+            "products": [{"slug": "asana", "name": "Asana"}],
+            "max_pages": 3,
+            "min_star": 1,
+            "max_star": 3,
+        },
+    ),
+    (
+        "trustpilot:example",
+        {
+            "site": "trustpilot",
+            "products": [{"slug": "example.com", "name": "Example"}],
+            "max_pages": 3,
+            "min_star": 1,
+            "max_star": 3,
+        },
+    ),
+]
+
+
 # ProductHunt surfaces per task 007 spec / feedback 013 heads-up:
 # - topic surface catches newer launches under specific verticals
 # - leaderboard surface catches the high-attention curated set
@@ -149,6 +187,16 @@ def _ensure_ih_source(session: Session, name: str, groups: list[str]) -> bool:
     return True
 
 
+def _ensure_review_source(session: Session, name: str, config: dict[str, Any]) -> bool:
+    existing = session.execute(
+        select(Source).where(Source.kind == "review_sites", Source.name == name)
+    ).scalar_one_or_none()
+    if existing is not None:
+        return False
+    session.add(Source(kind="review_sites", name=name, config_json=config, is_active=True))
+    return True
+
+
 def _ensure_ph_source(session: Session, name: str, config: dict[str, Any]) -> bool:
     existing = session.execute(
         select(Source).where(Source.kind == "producthunt", Source.name == name)
@@ -175,6 +223,11 @@ def main() -> int:
                 skipped += 1
         for name, groups in _IH_GROUPS:
             if _ensure_ih_source(session, name, groups):
+                inserted += 1
+            else:
+                skipped += 1
+        for name, config in _REVIEW_SITE_SOURCES:
+            if _ensure_review_source(session, name, config):
                 inserted += 1
             else:
                 skipped += 1
