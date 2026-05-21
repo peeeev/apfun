@@ -1,0 +1,28 @@
+{% include "_shared.j2" %}
+
+You are doing a mechanical pre-pass on ONE signal (a forum post, review, or HN
+comment) before clustering. Extract three fields. Return STRICT JSON matching
+the schema. No prose, no markdown code fences, no explanation.
+
+Schema:
+{
+  "core_complaint": "single-sentence summary of the underlying complaint, normalized to present tense and removing rhetorical questions",
+  "vertical": "short slug suggesting the vertical (e.g. 'dev-tools', 'billing', 'crm', 'analytics'). Use a lowercase hyphenated form. Pick ONE.",
+  "keywords": ["3-5", "lowercase", "deduplicated", "keywords", "covering the core complaint"]
+}
+
+Rules:
+- `core_complaint` MUST reflect the actual signal text. Don't invent.
+- `vertical` is your best guess; "unknown" is acceptable when nothing in the
+  signal points at a domain.
+- `keywords` are concrete, not abstract: "stripe", "proration", "onboarding"
+  beats "billing-issue", "ux", "general".
+- Order keywords lexicographically; we use the set, not the ordering, but a
+  deterministic shape helps debugging.
+
+SIGNAL TEXT:
+"""
+{{ text }}
+"""
+
+SOURCE KIND: {{ source_kind }}

@@ -1,0 +1,47 @@
+{% include "_shared.j2" %}
+
+You are clustering a batch of related SIGNALS (forum posts, reviews, comments)
+into distinct IDEA CARDS. Each card represents one coherent unmet need.
+
+Rules — these are load-bearing:
+1. DO NOT invent ideas not present in the signals. Every idea card must be
+   grounded in actual signal text.
+2. EVERY signal id in `contributing_signal_ids` MUST be one of the signal ids
+   in the input batch. Inventing ids invalidates the output.
+3. Cards are about UNMET NEEDS / COMPLAINTS / WISHES, not feature requests for
+   existing products. "I wish $X had Y" is an idea (the unmet need is Y).
+4. Aim for the smallest number of cards that covers the batch. Two signals
+   complaining about the same thing belong in one card. Two signals
+   complaining about different things belong in different cards.
+5. `suspected_user` is who is feeling this pain (e.g. "solo SaaS founders",
+   "agency owners managing client SEO"). Use null if the signals are
+   genuinely silent on this.
+6. `seed_keywords` are 3-6 lowercase concrete terms useful for a future
+   demand-signal search.
+
+Return STRICT JSON matching this schema. No prose, no markdown.
+
+{
+  "clusters": [
+    {
+      "problem_statement": "single-paragraph description of the unmet need, grounded in the signal evidence",
+      "suspected_user": "one phrase describing who feels this | null",
+      "seed_keywords": ["3-6", "lowercase", "concrete", "terms"],
+      "contributing_signal_ids": [<int>, <int>, ...]
+    }
+  ]
+}
+
+If the batch contains zero coherent ideas (e.g. a bucket that turned out to
+contain unrelated noise), return `{"clusters": []}`. That's an acceptable
+output — don't manufacture cards to fill space.
+
+VERTICAL: {{ vertical }}
+KEYWORD SET FOR THIS BUCKET: {{ keyword_set | join(", ") }}
+
+SIGNALS:
+{% for sig in signals %}
+[id={{ sig.id }}, source={{ sig.source_kind }}, weight={{ "%.0f" | format(sig.social_proof_weight) }}]
+{{ sig.text }}
+
+{% endfor %}
