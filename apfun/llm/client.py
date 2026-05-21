@@ -15,7 +15,7 @@ import logging
 import random
 import time
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any, Literal, TypeVar, cast
 
 import anthropic
 from anthropic.types import Message
@@ -26,6 +26,9 @@ from apfun.db import SessionLocal
 from apfun.models import LLMRun
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+CacheTTL = Literal["5m", "1h"]
 
 
 # Model identifiers — both confirmed present on Anthropic's pricing page.
@@ -56,23 +59,25 @@ JUDGMENT_TASKS: frozenset[str] = frozenset(
 
 # Pricing in USD per 1M tokens. Compute est_cost_usd at call time and persist
 # the dollar value (not the formula) so historical rows survive price changes.
-# Cache write rates are for the 5-minute ephemeral cache (the default
-# `cache_control: ephemeral` TTL); if a call site ever sets `ttl="1h"`, add a
-# `cache_write_1h` key here (Opus 4.7: $10/MTok; Haiku 4.5: $2/MTok). Bump the
-# verified date below whenever this dict changes.
-# verified 2026-05-18 https://docs.anthropic.com/en/docs/about-claude/pricing
+# `cache_write_5m` is the default 5-minute ephemeral cache rate;
+# `cache_write_1h` is the 1-hour cache rate (Opus 4.7 only — Haiku is short
+# calls; the 1h TTL doesn't apply). Per orchestrator feedback 016 Q2 — the
+# 1h knob exists for long-running batch reuse (Stage 1 cluster_merge crosses
+# the 5-min default TTL boundary).
+# verified 2026-05-21 https://docs.anthropic.com/en/docs/about-claude/pricing
 PRICING: dict[str, dict[str, float]] = {
     "claude-opus-4-7": {
         "input": 5.0,
         "output": 25.0,
         "cache_read": 0.50,
-        "cache_write": 6.25,
+        "cache_write_5m": 6.25,
+        "cache_write_1h": 10.00,
     },
     "claude-haiku-4-5": {
         "input": 1.0,
         "output": 5.0,
         "cache_read": 0.10,
-        "cache_write": 1.25,
+        "cache_write_5m": 1.25,
     },
 }
 
@@ -114,11 +119,33 @@ _MECHANIC_MAX_TOKENS: int = 2_000
 _THINKING_BUDGET_WARN_FRACTION: float = 0.9
 
 
-# Cache-control marker for the 5-minute ephemeral cache. If a call site needs
-# ttl="1h" (e.g., long-running batch reuse beyond 5 min), extend _build_system
-# and update PRICING with a `cache_write_1h` key.
-# verified 2026-05-18 https://docs.anthropic.com/en/docs/about-claude/pricing
-_EPHEMERAL_CACHE_CONTROL: dict[str, str] = {"type": "ephemeral"}
+# Cache-control markers. The 5-minute ephemeral cache is the SDK default.
+# `cache_control={"type": "ephemeral"}` with no `ttl` is equivalent to the
+# 5m tier; passing `ttl="1h"` enables the longer cache for batches that
+# span the 5-min boundary (Stage 1 cluster_merge in particular).
+# verified 2026-05-21 https://docs.anthropic.com/en/docs/about-claude/pricing
+_CACHE_CONTROL: dict[CacheTTL, dict[str, str]] = {
+    "5m": {"type": "ephemeral"},
+    "1h": {"type": "ephemeral", "ttl": "1h"},
+}
+
+
+class PolicyViolation(RuntimeError):
+    """Raised when a call would violate the model-selection policy."""
+
+
+class JSONParseError(RuntimeError):
+    """Raised by a `parse_fn` inside `_call` when the LLM response doesn't
+    match the requested schema.
+
+    Treated as retryable by the wrapper's retry loop, like `_RETRYABLE` API
+    errors. The wrapper logs the truncated raw response on the final attempt's
+    failure so debugging has an artifact (per orchestrator feedback 016 Q3).
+    """
+
+    def __init__(self, msg: str, *, raw_response: str = "") -> None:
+        super().__init__(msg)
+        self.raw_response = raw_response[:2000]
 
 
 _RETRYABLE: tuple[type[Exception], ...] = (
@@ -126,11 +153,8 @@ _RETRYABLE: tuple[type[Exception], ...] = (
     anthropic.APITimeoutError,
     anthropic.APIConnectionError,
     anthropic.InternalServerError,
+    JSONParseError,
 )
-
-
-class PolicyViolation(RuntimeError):
-    """Raised when a call would violate the model-selection policy."""
 
 
 def estimate_cost_usd(
@@ -140,21 +164,27 @@ def estimate_cost_usd(
     output_tokens: int,
     cache_read_tokens: int,
     cache_write_tokens: int,
+    cache_ttl: CacheTTL = "5m",
 ) -> float:
     """Compute USD cost from token counts using the static PRICING table.
 
     Returns 0.0 if the model isn't in the table — silent, because the row is
     still logged for accounting and a missing price is a config gap, not a bug
     that should crash the pipeline.
+
+    `cache_ttl` picks the right `cache_write_*` rate (5m default; 1h for
+    long-batch reuse). Per orchestrator feedback 016 Q2.
     """
     p = PRICING.get(model)
     if p is None:
         return 0.0
+    cache_write_key = f"cache_write_{cache_ttl}"
+    cache_write_rate = p.get(cache_write_key, p.get("cache_write_5m", 0.0))
     return (
         input_tokens * p["input"]
         + output_tokens * p["output"]
         + cache_read_tokens * p["cache_read"]
-        + cache_write_tokens * p["cache_write"]
+        + cache_write_tokens * cache_write_rate
     ) / 1_000_000
 
 
@@ -164,24 +194,33 @@ def _backoff_seconds(attempt: int) -> float:
     return base + random.uniform(0, base * 0.25)
 
 
-def _build_system(system: str, cache_blocks: list[str] | None) -> str | list[dict[str, Any]]:
+def _build_system(
+    system: str,
+    cache_blocks: list[str] | None,
+    *,
+    cache_ttl: CacheTTL = "5m",
+) -> str | list[dict[str, Any]]:
     """Build the system parameter. With cache_blocks, mark them ephemeral.
 
-    Current shape: each entry in `cache_blocks` becomes a system content block
-    tagged `cache_control: ephemeral` (5-min TTL), with `system` appended uncached
-    at the end. Doesn't yet support caching the per-call `system` string itself,
-    partial caching of `messages` content, or `ttl="1h"` cache control — generalize
-    the parameter shape when a real call site needs finer control.
+    Each entry in `cache_blocks` becomes a system content block tagged with
+    `cache_control: {"type": "ephemeral"}` (5-min default) or
+    `{"type": "ephemeral", "ttl": "1h"}` (1h tier for long-running batches).
+    The per-call `system` string is appended uncached at the end.
+
+    `cache_ttl="1h"` applies to ALL cache_blocks in this call; per-block TTL
+    selection isn't a real use case yet (would require a richer parameter
+    shape — defer until a call site needs it). Per orchestrator feedback 016 Q2.
     """
     if not cache_blocks:
         return system
+    control = _CACHE_CONTROL[cache_ttl]
     blocks: list[dict[str, Any]] = []
     for block in cache_blocks:
         blocks.append(
             {
                 "type": "text",
                 "text": block,
-                "cache_control": _EPHEMERAL_CACHE_CONTROL,
+                "cache_control": control,
             }
         )
     blocks.append({"type": "text", "text": system})
@@ -216,6 +255,7 @@ class LLMClient:
         messages: list[dict[str, Any]],
         *,
         cache_blocks: list[str] | None = None,
+        cache_ttl: CacheTTL = "5m",
         thinking_budget_tokens: int | None = None,
         max_tokens: int = _JUDGE_MAX_TOKENS,
         candidate_id: int | None = None,
@@ -225,6 +265,10 @@ class LLMClient:
         `thinking_budget_tokens=None` (default) → look up DEFAULT_THINKING_BUDGET[task],
         falling back to `_FALLBACK_THINKING_BUDGET` if the task isn't in the dict.
         Pass an explicit int to override.
+
+        `cache_ttl="1h"` opts into the 1-hour cache tier (more expensive write,
+        useful for batches that exceed the 5-min default TTL — Stage 1's
+        cluster_merge pass in particular). Per orchestrator feedback 016 Q2.
         """
         budget = (
             thinking_budget_tokens
@@ -237,10 +281,71 @@ class LLMClient:
             system=system,
             messages=messages,
             cache_blocks=cache_blocks,
+            cache_ttl=cache_ttl,
             timeout_s=_JUDGE_TIMEOUT_S,
             max_tokens=max_tokens,
             thinking={"type": "enabled", "budget_tokens": budget},
             candidate_id=candidate_id,
+        )
+
+    def judge_json(
+        self,
+        task: str,
+        system: str,
+        messages: list[dict[str, Any]],
+        *,
+        schema: type[T],
+        cache_blocks: list[str] | None = None,
+        cache_ttl: CacheTTL = "5m",
+        thinking_budget_tokens: int | None = None,
+        max_tokens: int = _JUDGE_MAX_TOKENS,
+        candidate_id: int | None = None,
+    ) -> T:
+        """Opus 4.7 + Pydantic schema validation. Retries on JSONParseError.
+
+        The prompt MUST instruct the model to emit JSON that matches `schema`.
+        On schema mismatch, raises `JSONParseError` — treated as retryable by
+        the wrapper's retry loop alongside transient API errors. The final-
+        attempt failure logs the truncated raw response into `llm_runs.error`.
+
+        `schema` is a Pydantic model class with `model_validate_json` available.
+        Per orchestrator feedback 016 Q3.
+        """
+        budget = (
+            thinking_budget_tokens
+            if thinking_budget_tokens is not None
+            else DEFAULT_THINKING_BUDGET.get(task, _FALLBACK_THINKING_BUDGET)
+        )
+
+        def parse(msg: Message) -> T:
+            text = "".join(
+                cast(Any, b).text for b in msg.content if getattr(b, "type", None) == "text"
+            )
+            try:
+                # Pydantic's model_validate_json gives canonical error messages
+                # and avoids a round-trip through json.loads.
+                return cast(Any, schema).model_validate_json(text)
+            except Exception as e:  # noqa: BLE001 — ValidationError + json errors
+                raise JSONParseError(
+                    f"{task!r}: response did not match schema {schema.__name__}: {e}",
+                    raw_response=text,
+                ) from e
+
+        return cast(
+            T,
+            self._call(
+                model=JUDGE_MODEL,
+                task=task,
+                system=system,
+                messages=messages,
+                cache_blocks=cache_blocks,
+                cache_ttl=cache_ttl,
+                timeout_s=_JUDGE_TIMEOUT_S,
+                max_tokens=max_tokens,
+                thinking={"type": "enabled", "budget_tokens": budget},
+                candidate_id=candidate_id,
+                parse_fn=parse,
+            ),
         )
 
     def mechanic(
@@ -265,10 +370,62 @@ class LLMClient:
             system=system,
             messages=messages,
             cache_blocks=cache_blocks,
+            cache_ttl="5m",  # Haiku doesn't use the 1h tier in practice
             timeout_s=_MECHANIC_TIMEOUT_S,
             max_tokens=max_tokens,
             thinking=None,
             candidate_id=candidate_id,
+        )
+
+    def mechanic_json(
+        self,
+        task: str,
+        system: str,
+        messages: list[dict[str, Any]],
+        *,
+        schema: type[T],
+        cache_blocks: list[str] | None = None,
+        max_tokens: int = _MECHANIC_MAX_TOKENS,
+        candidate_id: int | None = None,
+    ) -> T:
+        """Haiku 4.5 + Pydantic schema validation. Retries on JSONParseError.
+
+        Same shape as `judge_json` but for mechanical work (Stage 1's per-signal
+        Haiku pre-pass extracting `{core_complaint, vertical, keywords}`).
+        Refuses tasks in JUDGMENT_TASKS.
+        """
+        if task in JUDGMENT_TASKS:
+            raise PolicyViolation(
+                f"task={task!r} requires judge_json() (Opus 4.7), not mechanic_json() (Haiku 4.5)."
+            )
+
+        def parse(msg: Message) -> T:
+            text = "".join(
+                cast(Any, b).text for b in msg.content if getattr(b, "type", None) == "text"
+            )
+            try:
+                return cast(Any, schema).model_validate_json(text)
+            except Exception as e:  # noqa: BLE001
+                raise JSONParseError(
+                    f"{task!r}: response did not match schema {schema.__name__}: {e}",
+                    raw_response=text,
+                ) from e
+
+        return cast(
+            T,
+            self._call(
+                model=MECHANIC_MODEL,
+                task=task,
+                system=system,
+                messages=messages,
+                cache_blocks=cache_blocks,
+                cache_ttl="5m",
+                timeout_s=_MECHANIC_TIMEOUT_S,
+                max_tokens=max_tokens,
+                thinking=None,
+                candidate_id=candidate_id,
+                parse_fn=parse,
+            ),
         )
 
     def _call(
@@ -279,14 +436,25 @@ class LLMClient:
         system: str,
         messages: list[dict[str, Any]],
         cache_blocks: list[str] | None,
+        cache_ttl: CacheTTL,
         timeout_s: int,
         max_tokens: int,
         thinking: dict[str, Any] | None,
         candidate_id: int | None,
-    ) -> Message:
+        parse_fn: Callable[[Message], Any] | None = None,
+    ) -> Any:
+        """Inner call/retry loop.
+
+        Returns `Message` when `parse_fn` is None (the historical shape).
+        When `parse_fn` is provided, applies it to the response and returns
+        its result; a `JSONParseError` raised by `parse_fn` is treated as
+        retryable in the same loop as transient API errors. On the final
+        attempt's `JSONParseError`, the truncated raw response is logged into
+        `llm_runs.error` for debugging (per orchestrator feedback 016 Q3).
+        """
         kwargs: dict[str, Any] = {
             "model": model,
-            "system": _build_system(system, cache_blocks),
+            "system": _build_system(system, cache_blocks, cache_ttl=cache_ttl),
             "messages": messages,
             "max_tokens": max_tokens,
         }
@@ -340,12 +508,44 @@ class LLMClient:
                 )
                 raise
 
+            # Token accounting + budget warning happen before the parse step
+            # so even a parse-failure attempt is fully logged.
             usage = cast(Any, msg.usage)
             input_tokens = int(usage.input_tokens or 0)
             output_tokens = int(usage.output_tokens or 0)
             cache_read = int(getattr(usage, "cache_read_input_tokens", None) or 0)
             cache_write = int(getattr(usage, "cache_creation_input_tokens", None) or 0)
             self._maybe_warn_budget(task=task, thinking=thinking, output_tokens=output_tokens)
+
+            parsed: Any = msg
+            if parse_fn is not None:
+                try:
+                    parsed = parse_fn(msg)
+                except JSONParseError as e:
+                    if attempt < _MAX_RETRIES:
+                        retry_log.append(
+                            {
+                                "attempt": attempt,
+                                "error_type": "JSONParseError",
+                                "error_msg": str(e),
+                                "raw_response": e.raw_response,
+                                "latency_ms": int((time.monotonic() - attempt_started) * 1000),
+                            }
+                        )
+                        time.sleep(_backoff_seconds(attempt))
+                        continue
+                    # Final attempt failed; log with truncated raw response.
+                    self._log_failure(
+                        task=task,
+                        model=model,
+                        attempts=attempt,
+                        latency_ms=_ms_since(started),
+                        candidate_id=candidate_id,
+                        error=f"JSONParseError: {e}\nraw_response[:2000]={e.raw_response!r}",
+                        retry_log_json=retry_log,
+                    )
+                    raise
+
             self._log_success(
                 task=task,
                 model=model,
@@ -362,10 +562,11 @@ class LLMClient:
                     output_tokens=output_tokens,
                     cache_read_tokens=cache_read,
                     cache_write_tokens=cache_write,
+                    cache_ttl=cache_ttl,
                 ),
                 retry_log_json=retry_log,
             )
-            return msg
+            return parsed
 
         # The retry loop returns or raises on every path; if we reach here, something is wrong.
         raise RuntimeError("LLMClient retry loop exited without success or exception")

@@ -1,0 +1,36 @@
+{% include "_shared.j2" %}
+
+You are merging clusters produced by pass-1 (which ran independently on
+chunks of the same bucket). Decide which pass-1 clusters describe the SAME
+underlying unmet need and should be merged into a canonical cluster.
+
+You are NOT re-clustering from raw signals. You are only deciding identity
+relationships between already-formed clusters. Operate on titles and
+keywords only — the full evidence per cluster is not provided here.
+
+Rules:
+1. Two clusters with the same problem framing (even if worded differently)
+   belong to the same canonical id. Pick ONE of the pass-1 ids as the
+   canonical id for that group.
+2. Two clusters with overlapping but distinct framing stay separate. Don't
+   over-merge.
+3. Every pass-1 id MUST appear as a key in `merge_map`. A cluster that
+   doesn't merge with any other maps to itself (`{"abc": "abc"}`).
+4. The canonical id MUST be one of the pass-1 ids in the input. Don't invent.
+
+Return STRICT JSON. No prose, no markdown.
+
+{
+  "merge_map": {
+    "<pass_1_cluster_id>": "<canonical_cluster_id>",
+    ...
+  }
+}
+
+PASS-1 CLUSTERS:
+{% for cluster in clusters %}
+[id={{ cluster.id }}]
+  problem: {{ cluster.problem_statement }}
+  keywords: {{ cluster.seed_keywords | join(", ") }}
+
+{% endfor %}
