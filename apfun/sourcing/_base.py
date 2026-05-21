@@ -37,9 +37,12 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 import httpx
+
+if TYPE_CHECKING:
+    from playwright.sync_api import Browser, BrowserContext, Playwright
 from sqlalchemy.orm import Session
 
 from apfun.models import SchedulerRun, Source
@@ -226,7 +229,49 @@ def apply_default_health_update(
             )
 
 
+class IngestClient(Protocol):
+    """Batch-level lifecycle contract for ingester clients.
+
+    `httpx.Client` satisfies this implicitly (it has `close()`); the browser-
+    based review miners wrap a Playwright `Browser` in `BrowserBatchClient`
+    below so the same batch wrapper shape works for both.
+
+    The protocol is intentionally minimal — anything beyond `close()` is
+    source-specific and belongs in the concrete client type, not the Protocol.
+    """
+
+    def close(self) -> None: ...
+
+
+@dataclass
+class BrowserBatchClient:
+    """Batch-level client for browser-based ingesters (task 009 review miner).
+
+    One `Playwright` instance + one `Browser` per batch. Per-source
+    `ingest()` calls `new_context()` for each source so cookies/storage stay
+    scoped to one source's worth of products. Browser launch is ~1-2s; context
+    creation is ~50ms — keeping the browser at batch scope amortizes the
+    launch cost across all sources in the batch.
+
+    Per orchestrator feedback 014 Q1.
+    """
+
+    playwright: Playwright
+    browser: Browser
+
+    def new_context(self, **kwargs: Any) -> BrowserContext:
+        return self.browser.new_context(**kwargs)
+
+    def close(self) -> None:
+        try:
+            self.browser.close()
+        finally:
+            self.playwright.stop()
+
+
 __all__ = [
+    "BrowserBatchClient",
+    "IngestClient",
     "IngestResult",
     "MAX_RETRIES",
     "RETRY_BASE_DELAY_S",

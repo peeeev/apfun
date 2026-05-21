@@ -1,0 +1,45 @@
+<!--
+_fixture_meta:
+{
+  "captured": "2026-05-19 — synthetic seed",
+  "refreshed": null,
+  "source": "GET https://www.trustpilot.com/review/example.com?stars=1&stars=2&stars=3&page=1"
+}
+-->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Trustpilot — example.com reviews (synthetic)</title></head>
+<body>
+<main class="reviews-list">
+  <article class="tp-review" data-review-id="tp-rev-201">
+    <h3 class="tp-review-title">Support is slow</h3>
+    <div class="tp-review-body">Four-day reply windows on what should be one-hour issues. Tickets escalated to "engineering" just sit there.</div>
+    <span class="tp-rating" data-rating="2"></span>
+    <span class="tp-reviewer">tp-user-a</span>
+    <time datetime="2026-04-09T16:00:00Z">April 9, 2026</time>
+    <span class="tp-helpful-count">8</span>
+    <a class="tp-permalink" href="/review/example.com/tp-rev-201"></a>
+  </article>
+
+  <article class="tp-review" data-review-id="tp-rev-202">
+    <h3 class="tp-review-title">Sign-up was great, billing was not</h3>
+    <div class="tp-review-body">Onboarding flow looked premium; canceling forced me to call a sales line during business hours. Bait-and-switch.</div>
+    <span class="tp-rating" data-rating="1"></span>
+    <span class="tp-reviewer">tp-user-b</span>
+    <time datetime="2026-04-11T10:30:00Z">April 11, 2026</time>
+    <span class="tp-helpful-count">45</span>
+    <a class="tp-permalink" href="/review/example.com/tp-rev-202"></a>
+  </article>
+
+  <article class="tp-review" data-review-id="tp-rev-glowing">
+    <h3 class="tp-review-title">Glowing review (filter test)</h3>
+    <div class="tp-review-body">Five stars — should be filtered out by the min/max star range.</div>
+    <span class="tp-rating" data-rating="5"></span>
+    <span class="tp-reviewer">tp-user-c</span>
+    <time datetime="2026-04-13T13:00:00Z">April 13, 2026</time>
+    <span class="tp-helpful-count">0</span>
+    <a class="tp-permalink" href="/review/example.com/tp-rev-glowing"></a>
+  </article>
+</main>
+</body>
+</html>

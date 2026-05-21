@@ -1,0 +1,4 @@
+site,product_slug,product_name,review_id,title,body,rating,author,posted_at,helpful_count,permalink
+g2,zendesk,Zendesk,csv-z-001,Ticket queue UI is overloaded,"Custom views are a maze; new agents can't find their queue without an internal walkthrough.",2,Internal Rev,2026-05-01T10:00:00Z,7,https://www.g2.com/products/zendesk/reviews/csv-z-001
+g2,zendesk,Zendesk,csv-z-002,Macros stopped working after the May update,"Two macros that worked Friday were broken Monday. Support said 'we're tracking it'. Six weeks later it's still tracking.",1,Frustrated User,2026-05-02T11:00:00Z,22,https://www.g2.com/products/zendesk/reviews/csv-z-002
+capterra,zendesk,Zendesk,csv-z-003,Pricing for AI add-on is opaque,"$25/agent on top of the base tier, with no clear value calculation. Sales kept dodging the question.",3,CSV Reviewer,2026-05-03T09:30:00Z,14,
