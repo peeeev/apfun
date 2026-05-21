@@ -12,6 +12,7 @@ from apfun.models.project import Project, ProjectStatus
 from apfun.models.raw_signal import RawSignal
 from apfun.models.scheduler_run import SchedulerRun
 from apfun.models.score import Score
+from apfun.models.signal_text import SignalText
 from apfun.models.source import Source
 
 __all__ = [
@@ -35,6 +36,7 @@ __all__ = [
     "RawSignal",
     "SchedulerRun",
     "Score",
+    "SignalText",
     "Source",
     "TimestampMixin",
 ]
