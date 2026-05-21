@@ -16,6 +16,7 @@ Sequenced, PR-sized, each ~half-day and independently testable. Numbers are the 
 - 007 — ProductHunt ingester
 - 008 — IndieHackers ingester
 - 009 — Review miner (G2 / Capterra / Trustpilot via Playwright)
+- 010a — Signal text normalization (raw_signals → uniform signal_text table; ETL prep for Stage 1)
 - 010 — Stage 1 clustering (Opus 4.7: raw signals → candidate idea cards)
 
 ## Phase C — Stage 2 demand check + scheduling

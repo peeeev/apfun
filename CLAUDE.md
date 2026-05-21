@@ -161,7 +161,7 @@ Status values: `open` (request submitted, no feedback yet), `answered` (feedback
 - `apfun/llm/client.py` — single Anthropic entrypoint; enforces model policy and logs runs
 - `apfun/sourcing/` — one module per source (reddit, hn, ph, ih, review_sites)
 - `apfun/demand/` — Stage 2 (pytrends, autosuggest)
-- `apfun/pipeline/` — Stage 3→4→5 orchestration triggered by HITL approval
+- `apfun/pipeline/` — Stage 0 normalization (`normalize.py` + `_extractors.py`, raw_signals → signal_text) and Stage 3→4→5 orchestration triggered by HITL approval
 - `apfun/scoring/` — Stage 4 saturation scoring
 - `apfun/synthesis/` — Stage 5 differentiation synthesis
 - `apfun/scheduler/` — APScheduler setup and job registration
