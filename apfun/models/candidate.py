@@ -7,12 +7,17 @@ task 019). They evolve independently — see CLAUDE.md → Lessons learned.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import JSON, CheckConstraint, Enum, ForeignKey, Index, String, Text
+from sqlalchemy import JSON, CheckConstraint, DateTime, Enum, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from apfun.models.base import Base, IdMixin, TimestampMixin, check_enum_sql, enum_values
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
 
 
 class Decision(StrEnum):
@@ -85,4 +90,10 @@ class CandidateSignal(Base):
     )
     raw_signal_id: Mapped[int] = mapped_column(
         ForeignKey("raw_signals.id", ondelete="CASCADE"), primary_key=True
+    )
+    # Per orchestrator feedback 016 Q5/Q8: enables "N signals since rejection"
+    # UI computation and supports manual re-cluster (operator deletes rows;
+    # next Stage 1 run treats them as unclustered).
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )
