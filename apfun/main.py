@@ -3,9 +3,13 @@
 Apache strips/proxies basic-auth at the edge — this app does NOT look at
 `Authorization` headers. Per `docs/tasks/013-admin-ui-base.md`.
 """
+# pyright: reportMissingTypeStubs=false, reportUnknownMemberType=false
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
+from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,12 +17,28 @@ from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
 from apfun.config import settings
+from apfun.scheduler.setup import start_scheduler
 from apfun.web.routes import router as web_router
 
 _STATIC_DIR = Path(__file__).resolve().parent / "web" / "static"
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "web" / "templates"
 
-app = FastAPI(title="apfun")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Start the APScheduler on app startup; stop on shutdown.
+
+    Stored on `app.state.scheduler` so `/healthz` can report `running`.
+    """
+    scheduler: BackgroundScheduler = start_scheduler()
+    app.state.scheduler = scheduler
+    try:
+        yield
+    finally:
+        scheduler.shutdown(wait=False)
+
+
+app = FastAPI(title="apfun", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 app.include_router(web_router)
 

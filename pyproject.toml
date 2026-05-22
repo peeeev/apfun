@@ -15,6 +15,7 @@ dependencies = [
     "anthropic>=0.102.0",
     "selectolax>=0.4.9",
     "playwright>=1.60.0",
+    "apscheduler>=3.11.2",
 ]
 
 [dependency-groups]

@@ -40,6 +40,7 @@ def client_with_session(
     factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     monkeypatch.setattr("apfun.db.SessionLocal", factory)
     monkeypatch.setattr("apfun.web.routes.inbox.SessionLocal", factory)
+
     from apfun.main import app
 
     with TestClient(app) as c:
