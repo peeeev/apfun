@@ -1,0 +1,34 @@
+{% extends "_base.html" %}
+{% block title %}inbox · apfun{% endblock %}
+{% block content %}
+<section class="space-y-4">
+  <header class="flex items-center justify-between">
+    <h1 class="text-xl font-bold font-mono tracking-tight">Inbox</h1>
+    <p class="text-xs text-zinc-500 font-mono">
+      pending={{ pending|length }} · rejected-with-new-signals={{ rejected_with_new_signals|length }}
+    </p>
+  </header>
+
+  {% if pending %}
+    <div class="space-y-3" id="pending-list">
+      {% for c in pending %}
+        {% include "_candidate_card.html" %}
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="text-zinc-500 text-sm">No pending candidates. Stage 1 hasn't produced any review-needed items.</p>
+  {% endif %}
+
+  {% if rejected_with_new_signals %}
+    <section class="mt-4">
+      <h2 class="text-base font-bold font-mono mb-2 text-amber-400">Re-review? (rejected with new signals)</h2>
+      <p class="text-xs text-zinc-500 mb-2">Decisions are durable — Stage 1 just kept linking signals after you rejected these.</p>
+      <div class="space-y-3" id="rejected-resurrect-list">
+        {% for c in rejected_with_new_signals %}
+          {% include "_candidate_card.html" %}
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+</section>
+{% endblock %}

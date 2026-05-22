@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}apfun{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  {# HTMX pinned + SRI. Bump the version + recompute the integrity hash when upgrading;
+     document the upgrade path in CLAUDE.md. #}
+  <script src="https://unpkg.com/htmx.org@2.0.4"
+          integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
+          crossorigin="anonymous"></script>
+</head>
+<body class="bg-zinc-950 text-zinc-100 font-sans">
+  <header class="border-b border-zinc-800 px-4 py-3">
+    <nav class="flex items-center justify-between text-sm font-mono">
+      <a href="/" class="font-bold tracking-tight text-zinc-100 hover:text-white">apfun</a>
+      <ul class="flex gap-6">
+        <li><a href="/inbox" class="hover:text-white {% if active == 'inbox' %}text-white{% else %}text-zinc-400{% endif %}">inbox</a></li>
+        <li><a href="/opportunities" class="hover:text-white {% if active == 'opportunities' %}text-white{% else %}text-zinc-400{% endif %}">opportunities</a></li>
+        <li><a href="/sources" class="hover:text-white {% if active == 'sources' %}text-white{% else %}text-zinc-400{% endif %}">sources</a></li>
+        <li><a href="/projects" class="hover:text-white {% if active == 'projects' %}text-white{% else %}text-zinc-400{% endif %}">projects</a></li>
+      </ul>
+    </nav>
+  </header>
+  <main class="px-4 py-6 max-w-5xl mx-auto">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
