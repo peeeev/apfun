@@ -261,3 +261,57 @@ def test_mechanic_json_retries_jsonparseerror(
     )
     assert out.score == 7
     assert mock.messages.create.call_count == 2
+
+
+# ──────────────────── markdown-fence stripping (runbook 001 finding) ─────────
+
+
+def test_strip_json_fences_helper_idempotent() -> None:
+    """Pin the helper's contract: fence wrapping unwrapped; bare JSON untouched."""
+    from apfun.llm.client import _strip_json_fences
+
+    # Bare JSON — no fences → returned unchanged.
+    assert _strip_json_fences('{"a": 1}') == '{"a": 1}'
+    # ```json fence
+    assert _strip_json_fences('```json\n{"a": 1}\n```') == '{"a": 1}'
+    # ``` fence with no language tag
+    assert _strip_json_fences('```\n{"a": 1}\n```') == '{"a": 1}'
+    # Leading/trailing whitespace OK
+    assert _strip_json_fences('  ```json\n{"a": 1}\n```  ') == '{"a": 1}'
+    # Idempotent — applying twice gives the same result
+    once = _strip_json_fences('```json\n{"a": 1}\n```')
+    assert _strip_json_fences(once) == once
+
+
+def test_judge_json_accepts_fenced_response(make_client: Callable[..., ClientPair]) -> None:
+    """Regression: Haiku/Opus occasionally wrap JSON in ```json fences even
+    when the prompt forbids it. Per runbook 001 (2026-05-22): the Stage 1
+    Haiku pre-pass hit this on EVERY response and retried 3 times to no avail.
+    The fix strips fences defensively before pydantic validation.
+    """
+    fenced = '```json\n{"title": "fenced", "score": 99}\n```'
+    client, _mock = make_client(response=_make_response(text_body=fenced))
+    out = client.judge_json(
+        "cluster",
+        "sys",
+        [{"role": "user", "content": "go"}],
+        schema=DemoSchema,
+    )
+    assert isinstance(out, DemoSchema)
+    assert out.title == "fenced"
+    assert out.score == 99
+
+
+def test_mechanic_json_accepts_fenced_response(
+    make_client: Callable[..., ClientPair],
+) -> None:
+    fenced = '```\n{"title": "no-lang-tag", "score": 1}\n```'
+    client, _mock = make_client(response=_make_response(text_body=fenced))
+    out = client.mechanic_json(
+        "dedup",
+        "sys",
+        [{"role": "user", "content": "go"}],
+        schema=DemoSchema,
+    )
+    assert isinstance(out, DemoSchema)
+    assert out.title == "no-lang-tag"

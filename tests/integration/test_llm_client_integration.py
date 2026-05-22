@@ -37,7 +37,7 @@ def test_judge_smoke(client: LLMClient, engine: Engine) -> None:
         "cluster",
         'Respond with a one-key JSON object: {"ok": true}. Nothing else.',
         [{"role": "user", "content": "echo"}],
-        thinking_budget_tokens=4_000,
+        effort="low",
         max_tokens=512,
     )
     types = [getattr(b, "type", None) for b in msg.content]

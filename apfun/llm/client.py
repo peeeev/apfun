@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import time
 from collections.abc import Callable
 from typing import Any, Literal, TypeVar, cast
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 CacheTTL = Literal["5m", "1h"]
+Effort = Literal["low", "medium", "high", "xhigh", "max"]
 
 
 # Model identifiers — both confirmed present on Anthropic's pricing page.
@@ -82,19 +84,25 @@ PRICING: dict[str, dict[str, float]] = {
 }
 
 
-# Per-task default thinking budgets for `judge()`. Spend reasoning where it pays off:
-# Stage 5 synthesis is the most important call in the system (where opportunity
-# quality lives), so it gets the largest budget. Stage 1 clustering is dedup-pass
-# work over narrow choices — 4k is enough. Callers can override with an explicit
-# `thinking_budget_tokens=N` kwarg. Retune triggers documented in CLAUDE.md →
-# Lessons learned; don't tune silently.
-# verified 2026-05-18 docs/orchestrator/004-feedback.md
-DEFAULT_THINKING_BUDGET: dict[str, int] = {
-    "cluster": 4_000,  # Stage 1: dedup over narrow choices
-    "score": 8_000,  # Stage 4: quantitative weighing
-    "synthesize": 16_000,  # Stage 5: differentiation — the highest-stakes call
-    "prd": 12_000,  # Gate 1: PRD generation
-    "architecture": 12_000,  # Gate 2: tech-stack proposals
+# Per-task default reasoning effort for `judge()`. Spend reasoning where it
+# pays off: Stage 5 synthesis is the most important call in the system (where
+# opportunity quality lives), so it gets `xhigh`. Stage 1 clustering is
+# dedup-pass work over narrow choices — `medium` is enough. Callers can
+# override with an explicit `effort="..."` kwarg.
+#
+# Migrated from `DEFAULT_THINKING_BUDGET` (token budgets) on 2026-05-22 when
+# Opus 4.7 deprecated `thinking.type="enabled"` + budget_tokens in favor of
+# `thinking.type="adaptive"` + `output_config.effort`. The per-task ordering
+# is preserved; the absolute mapping (4k→medium, 8k→high, 16k→xhigh, 12k→high)
+# is a # heuristic informed by project-brief.md's "default to high effort"
+# baseline.
+# verified 2026-05-22 https://docs.anthropic.com/en/api/messages
+DEFAULT_EFFORT: dict[str, Effort] = {
+    "cluster": "medium",  # Stage 1: dedup over narrow choices
+    "score": "high",  # Stage 4: quantitative weighing
+    "synthesize": "xhigh",  # Stage 5: differentiation — the highest-stakes call
+    "prd": "high",  # Gate 1: PRD generation
+    "architecture": "high",  # Gate 2: tech-stack proposals
 }
 
 
@@ -108,15 +116,9 @@ _JUDGE_TIMEOUT_S: int = 120
 _MECHANIC_TIMEOUT_S: int = 30
 
 
-_FALLBACK_THINKING_BUDGET: int = 12_000
+_FALLBACK_EFFORT: Effort = "high"
 _JUDGE_MAX_TOKENS: int = 8_000
 _MECHANIC_MAX_TOKENS: int = 2_000
-
-
-# Warn when judge() output_tokens >= this fraction of the thinking budget —
-# signal that the budget is undersized for this task. Retune trigger; see
-# CLAUDE.md → Lessons learned.
-_THINKING_BUDGET_WARN_FRACTION: float = 0.9
 
 
 # Cache-control markers. The 5-minute ephemeral cache is the SDK default.
@@ -194,6 +196,29 @@ def _backoff_seconds(attempt: int) -> float:
     return base + random.uniform(0, base * 0.25)
 
 
+# Matches a fenced code block at the start/end of an LLM response. Captures
+# the inner content. Permissive about the language tag (`json` is common but
+# the model sometimes emits no tag, or a misspelled one).
+# heuristic 2026-05-22 — surfaced by runbook 001: Haiku occasionally fences
+# JSON output even when the prompt explicitly requests strict JSON. Defensive.
+_FENCED_BLOCK_RE = re.compile(
+    r"^\s*```(?:[a-zA-Z0-9_-]+)?\s*\n?(.*?)\n?```\s*$",
+    re.DOTALL,
+)
+
+
+def _strip_json_fences(text: str) -> str:
+    """Strip a leading/trailing markdown code fence from an LLM JSON response.
+
+    Returns the unwrapped JSON when the input is fence-wrapped; returns input
+    unchanged when no fences are present. Idempotent.
+    """
+    match = _FENCED_BLOCK_RE.match(text)
+    if match is None:
+        return text
+    return match.group(1).strip()
+
+
 def _build_system(
     system: str,
     cache_blocks: list[str] | None,
@@ -256,24 +281,26 @@ class LLMClient:
         *,
         cache_blocks: list[str] | None = None,
         cache_ttl: CacheTTL = "5m",
-        thinking_budget_tokens: int | None = None,
+        effort: Effort | None = None,
         max_tokens: int = _JUDGE_MAX_TOKENS,
         candidate_id: int | None = None,
     ) -> Message:
-        """Opus 4.7 with extended thinking. Use for any task that needs judgment.
+        """Opus 4.7 with adaptive extended thinking. Use for any task that needs judgment.
 
-        `thinking_budget_tokens=None` (default) → look up DEFAULT_THINKING_BUDGET[task],
-        falling back to `_FALLBACK_THINKING_BUDGET` if the task isn't in the dict.
-        Pass an explicit int to override.
+        `effort=None` (default) → look up DEFAULT_EFFORT[task], falling back to
+        `_FALLBACK_EFFORT` if the task isn't in the dict. Pass an explicit
+        Effort literal to override.
 
         `cache_ttl="1h"` opts into the 1-hour cache tier (more expensive write,
         useful for batches that exceed the 5-min default TTL — Stage 1's
         cluster_merge pass in particular). Per orchestrator feedback 016 Q2.
+
+        Migrated from `thinking_budget_tokens` on 2026-05-22: Opus 4.7
+        deprecated the explicit-token-budget API in favor of adaptive thinking
+        + `output_config.effort`.
         """
-        budget = (
-            thinking_budget_tokens
-            if thinking_budget_tokens is not None
-            else DEFAULT_THINKING_BUDGET.get(task, _FALLBACK_THINKING_BUDGET)
+        chosen_effort: Effort = (
+            effort if effort is not None else DEFAULT_EFFORT.get(task, _FALLBACK_EFFORT)
         )
         return self._call(
             model=JUDGE_MODEL,
@@ -284,7 +311,8 @@ class LLMClient:
             cache_ttl=cache_ttl,
             timeout_s=_JUDGE_TIMEOUT_S,
             max_tokens=max_tokens,
-            thinking={"type": "enabled", "budget_tokens": budget},
+            thinking={"type": "adaptive"},
+            effort=chosen_effort,
             candidate_id=candidate_id,
         )
 
@@ -297,7 +325,7 @@ class LLMClient:
         schema: type[T],
         cache_blocks: list[str] | None = None,
         cache_ttl: CacheTTL = "5m",
-        thinking_budget_tokens: int | None = None,
+        effort: Effort | None = None,
         max_tokens: int = _JUDGE_MAX_TOKENS,
         candidate_id: int | None = None,
     ) -> T:
@@ -311,20 +339,21 @@ class LLMClient:
         `schema` is a Pydantic model class with `model_validate_json` available.
         Per orchestrator feedback 016 Q3.
         """
-        budget = (
-            thinking_budget_tokens
-            if thinking_budget_tokens is not None
-            else DEFAULT_THINKING_BUDGET.get(task, _FALLBACK_THINKING_BUDGET)
+        chosen_effort: Effort = (
+            effort if effort is not None else DEFAULT_EFFORT.get(task, _FALLBACK_EFFORT)
         )
 
         def parse(msg: Message) -> T:
             text = "".join(
                 cast(Any, b).text for b in msg.content if getattr(b, "type", None) == "text"
             )
+            # Strip markdown code fences defensively — LLMs occasionally wrap
+            # JSON even when explicitly told not to (per runbook 001 finding).
+            cleaned = _strip_json_fences(text)
             try:
                 # Pydantic's model_validate_json gives canonical error messages
                 # and avoids a round-trip through json.loads.
-                return cast(Any, schema).model_validate_json(text)
+                return cast(Any, schema).model_validate_json(cleaned)
             except Exception as e:  # noqa: BLE001 — ValidationError + json errors
                 raise JSONParseError(
                     f"{task!r}: response did not match schema {schema.__name__}: {e}",
@@ -342,7 +371,8 @@ class LLMClient:
                 cache_ttl=cache_ttl,
                 timeout_s=_JUDGE_TIMEOUT_S,
                 max_tokens=max_tokens,
-                thinking={"type": "enabled", "budget_tokens": budget},
+                thinking={"type": "adaptive"},
+                effort=chosen_effort,
                 candidate_id=candidate_id,
                 parse_fn=parse,
             ),
@@ -403,8 +433,9 @@ class LLMClient:
             text = "".join(
                 cast(Any, b).text for b in msg.content if getattr(b, "type", None) == "text"
             )
+            cleaned = _strip_json_fences(text)
             try:
-                return cast(Any, schema).model_validate_json(text)
+                return cast(Any, schema).model_validate_json(cleaned)
             except Exception as e:  # noqa: BLE001
                 raise JSONParseError(
                     f"{task!r}: response did not match schema {schema.__name__}: {e}",
@@ -441,6 +472,7 @@ class LLMClient:
         max_tokens: int,
         thinking: dict[str, Any] | None,
         candidate_id: int | None,
+        effort: Effort | None = None,
         parse_fn: Callable[[Message], Any] | None = None,
     ) -> Any:
         """Inner call/retry loop.
@@ -460,6 +492,10 @@ class LLMClient:
         }
         if thinking is not None:
             kwargs["thinking"] = thinking
+        if effort is not None:
+            # Per the 2026-05-22 Opus 4.7 API migration: effort lives under
+            # `output_config`, not directly on the top-level kwargs.
+            kwargs["output_config"] = {"effort": effort}
 
         retry_log: list[dict[str, Any]] = []
         started = time.monotonic()
@@ -508,14 +544,18 @@ class LLMClient:
                 )
                 raise
 
-            # Token accounting + budget warning happen before the parse step
-            # so even a parse-failure attempt is fully logged.
+            # Token accounting happens before the parse step so even a
+            # parse-failure attempt is fully logged.
+            #
+            # NOTE: the legacy `_maybe_warn_budget` retune signal (per feedback
+            # 005) doesn't apply under the adaptive-thinking API — there's no
+            # explicit budget to be ">90% of." The retune discipline needs
+            # revisiting; see draft request 018.
             usage = cast(Any, msg.usage)
             input_tokens = int(usage.input_tokens or 0)
             output_tokens = int(usage.output_tokens or 0)
             cache_read = int(getattr(usage, "cache_read_input_tokens", None) or 0)
             cache_write = int(getattr(usage, "cache_creation_input_tokens", None) or 0)
-            self._maybe_warn_budget(task=task, thinking=thinking, output_tokens=output_tokens)
 
             parsed: Any = msg
             if parse_fn is not None:
@@ -570,35 +610,6 @@ class LLMClient:
 
         # The retry loop returns or raises on every path; if we reach here, something is wrong.
         raise RuntimeError("LLMClient retry loop exited without success or exception")
-
-    @staticmethod
-    def _maybe_warn_budget(
-        *, task: str, thinking: dict[str, Any] | None, output_tokens: int
-    ) -> None:
-        """Log a WARNING if a judge() call's output approaches its thinking budget.
-
-        Heuristic — uses total output_tokens (thinking + text) as a proxy because
-        anthropic's Usage doesn't surface thinking_tokens separately as of SDK
-        0.102.0. Conservative: fires for "thinking probably maxed" and "output
-        was just very large." Both warrant a budget retune look.
-        """
-        if thinking is None:
-            return
-        budget = int(thinking.get("budget_tokens", 0))
-        if budget <= 0:
-            return
-        # TODO: when SDK exposes thinking_tokens separately (post v0.102.0),
-        # switch this signal from output_tokens to thinking_tokens for precision.
-        if output_tokens >= _THINKING_BUDGET_WARN_FRACTION * budget:
-            logger.warning(
-                "judge(task=%r): output_tokens=%d is >=%d%% of thinking budget %d; "
-                "consider raising DEFAULT_THINKING_BUDGET[%r] or passing thinking_budget_tokens=N",
-                task,
-                output_tokens,
-                int(_THINKING_BUDGET_WARN_FRACTION * 100),
-                budget,
-                task,
-            )
 
     def _log_success(
         self,
