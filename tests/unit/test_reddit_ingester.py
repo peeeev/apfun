@@ -1,8 +1,13 @@
 """Unit tests for `apfun.sourcing.reddit.ingest`.
 
 Mocks `httpx.Client` against the synthetic fixture in `tests/fixtures/reddit/`.
-Verifies: dedup on re-ingest, deletion tagging, UA-header presence, content-
-hash stability, rate-limit `acquire()` invocation.
+Verifies: dedup on re-ingest, deletion tagging, UA-header + OAuth bearer
+presence, content-hash stability, rate-limit `acquire()` invocation, listing
+URL uses the oauth.reddit.com base.
+
+OAuth (task 005b) note: every test uses the `stub_reddit_auth` fixture so
+the production token endpoint is never hit. Tests for the auth lifecycle
+itself live in `test_reddit_oauth.py`.
 """
 
 from __future__ import annotations
@@ -41,6 +46,22 @@ def _make_mock_client(status: int = 200, body: dict[str, Any] | None = None) -> 
     client = MagicMock(spec=httpx.Client)
     client.get.return_value = response
     return client
+
+
+@pytest.fixture(autouse=True)
+def stub_reddit_auth(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Replace the OAuth singleton with a stub that returns a fixed token.
+
+    Reset the module-level singleton so prior tests don't leak. The stub's
+    `get_token` always returns the same string, which is what the tests
+    assert against in the Bearer header check.
+    """
+    monkeypatch.setattr(reddit_module, "_auth", None)
+    stub = MagicMock()
+    stub.get_token.return_value = "test-bearer"
+    stub.invalidate = MagicMock()
+    monkeypatch.setattr(reddit_module, "_get_auth", lambda: stub)
+    return stub
 
 
 @pytest.fixture
@@ -120,12 +141,24 @@ def test_user_agent_header_format(session: Session, reddit_source: Source) -> No
     ingest(session, reddit_source, client=client)
 
     assert client.get.call_count == 1
-    _, kwargs = client.get.call_args
+    args, kwargs = client.get.call_args
     headers = kwargs["headers"]
     ua = headers["User-Agent"]
     assert ua.startswith("apfun-funnel:v0.1 (by /u/")
     assert ua.endswith(")")
     assert "apfun_test_runner" in ua, "should pick up reddit_username from settings"
+    # OAuth: every listing fetch carries a Bearer header from the auth stub.
+    assert headers["Authorization"] == "Bearer test-bearer"
+
+
+def test_listing_uses_oauth_base_url(session: Session, reddit_source: Source) -> None:
+    """Listing fetches hit `oauth.reddit.com`, not `www.reddit.com`. Task 005b."""
+    client = _make_mock_client()
+    ingest(session, reddit_source, client=client)
+    args, _ = client.get.call_args
+    url = args[0]
+    assert url.startswith("https://oauth.reddit.com/r/SaaS/")
+    assert url.endswith("/new.json")
 
 
 def test_rate_limiter_acquired_per_call(

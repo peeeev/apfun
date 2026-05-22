@@ -12,6 +12,13 @@ class Settings(BaseSettings):
     db_url: str = "sqlite:///data/apfun.db"
     anthropic_api_key: str = ""
     reddit_username: str = ""
+    # OAuth client-credentials (task 005b). Loud-failure: empty default,
+    # `apfun.sourcing.reddit` raises with a CLAUDE.md-pointing message at the
+    # first call site when missing. Per the auth-secret discipline (CLAUDE.md
+    # → Auth secret discipline) — Reddit's OAuth endpoint returns a clear 401
+    # on missing/bad creds, so call-site failure is the right shape.
+    reddit_client_id: str = ""
+    reddit_client_secret: str = ""
     producthunt_token: str = ""
 
     @field_validator("host")

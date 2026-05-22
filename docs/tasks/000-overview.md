@@ -46,6 +46,7 @@ Sequenced, PR-sized, each ~half-day and independently testable. Numbers are the 
 ## Cross-cutting
 
 - 023 — GitHub Actions CI (sequenced between Phase E and Phase F per orchestrator feedback 009 — PR-review teeth land before the final UI/digest tasks; file-number is post-022 but execution-order is pre-020)
+- 005b — Reddit OAuth migration (post-task-005 follow-up after datacenter-IP blocking persisted on the anonymous endpoint; OAuth2 client-credentials via `oauth.reddit.com`). Per orchestrator request 020.
 
 ## Open questions (from brief §14, parked)
 
