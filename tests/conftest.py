@@ -12,6 +12,13 @@ from pathlib import Path
 # ingester.md → Config). The test default is a sentinel handle that mirrors
 # the production UA format without claiming a real Reddit account.
 os.environ.setdefault("APFUN_REDDIT_USERNAME", "apfun_test_runner")
+# Reddit OAuth client credentials default to sentinels so module-level
+# `_get_auth()` paths (when reached) construct without raising the loud-
+# failure. Tests that exercise OAuth fetch paths monkeypatch `_get_auth` to
+# return a stub so the real token endpoint is never hit. See
+# `tests/unit/test_reddit_ingester.py::stub_reddit_auth`.
+os.environ.setdefault("APFUN_REDDIT_CLIENT_ID", "test_client_id")
+os.environ.setdefault("APFUN_REDDIT_CLIENT_SECRET", "test_client_secret")
 # ProductHunt token is loud-failure (per CLAUDE.md → Auth secret discipline) —
 # defaults to empty, used at the call site. Tests that exercise the happy path
 # monkeypatch `settings.producthunt_token`; the missing-token test leaves the
