@@ -28,9 +28,9 @@ from typing import Any, cast
 
 import httpx
 from selectolax.parser import HTMLParser
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from apfun.db import try_insert
 from apfun.models import RawSignal, Source
 from apfun.sourcing._base import (
     IngestResult,
@@ -304,13 +304,7 @@ def _insert_signal(session: Session, source: Source, group: str, post: dict[str,
         content_hash=digest,
         payload_json=payload,
     )
-    session.add(signal)
-    try:
-        session.flush()
-    except IntegrityError:
-        session.rollback()
-        return False
-    return True
+    return try_insert(session, signal)
 
 
 def _apply_batch_health_updates(sources: list[Source], results: list[IngestResult]) -> None:

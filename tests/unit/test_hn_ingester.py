@@ -175,6 +175,49 @@ def test_numeric_filter_passed_for_since_hours(session: Session, hn_source: Sour
     assert params["numericFilters"].startswith("created_at_i>")
 
 
+def test_overlapping_queries_persist_unique_rows(session: Session) -> None:
+    """Regression: ingester runs multiple queries (per-source `queries` list);
+    HN often returns overlapping `objectID`s across related queries. Prior
+    to the SAVEPOINT fix, the second query's collision rolled back the
+    first query's successful inserts, leaving 0 rows in the DB despite
+    `items_captured` reporting non-zero.
+
+    Surfaced by runbook 001 on 2026-05-22.
+    """
+    src = Source(
+        kind="hn",
+        name="hn:overlap",
+        config_json={
+            # Three queries that all return the same fixture body — the
+            # second and third query's hits will be content_hash duplicates.
+            "queries": ["q1", "q2", "q3"],
+            "since_hours": 24,
+            "min_story_points": 1,
+            "min_comment_points": 0,
+        },
+    )
+    session.add(src)
+    session.flush()
+
+    client = _make_mock_client()
+    result = ingest(session, src, client=client)
+    session.commit()
+
+    # Fixture has 4 hits; min_story_points=1 admits all of them.
+    # First query inserts 4. Queries 2 + 3 hit collisions on every hit.
+    assert result.items_captured == 4
+
+    # Critical: a fresh session sees the 4 rows, not 0.
+    from sqlalchemy.orm import Session as _S
+
+    with _S(session.bind) as fresh:
+        n = fresh.execute(select(RawSignal)).scalars().all()
+        assert len(n) == 4, (
+            f"fresh-session must see all 4 rows after overlapping queries; got "
+            f"{len(n)}. If 0, the SAVEPOINT regression is back."
+        )
+
+
 def test_content_hash_uses_object_id() -> None:
     """objectID alone is the content_hash input — Algolia gives it as the canonical key."""
     h_a = hn_module._content_hash("44000001")

@@ -18,10 +18,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from apfun.config import settings
+from apfun.db import try_insert
 from apfun.models import RawSignal, Source
 from apfun.sourcing._base import (
     IngestResult,
@@ -195,13 +195,7 @@ def _insert_signal(session: Session, source: Source, subreddit: str, row: dict[s
         content_hash=digest,
         payload_json=payload,
     )
-    session.add(signal)
-    try:
-        session.flush()
-    except IntegrityError:
-        session.rollback()
-        return False
-    return True
+    return try_insert(session, signal)
 
 
 def _fraction_403(results: list[IngestResult]) -> float:
