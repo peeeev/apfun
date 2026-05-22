@@ -22,7 +22,8 @@ def client(engine: Engine, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
     Two routes use `SessionLocal`: the inbox endpoints (via `_session` dep)
     and any future caller that imports from `apfun.db`. The monkeypatch hits
     both at the symbol level so dependency-overriding through FastAPI's DI
-    isn't required.
+    isn't required. The `_stub_scheduler` autouse fixture (conftest) takes
+    care of the lifespan-startup scheduler stub.
     """
     factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     monkeypatch.setattr("apfun.db.SessionLocal", factory)
@@ -37,7 +38,7 @@ def client(engine: Engine, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
 def test_healthz_returns_ok(client: TestClient) -> None:
     r = client.get("/healthz")
     assert r.status_code == 200
-    assert r.json() == {"ok": True}
+    assert r.json() == {"ok": True, "scheduler": {"running": True}}
 
 
 def test_static_app_css_served(client: TestClient) -> None:
