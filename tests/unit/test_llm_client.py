@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from unittest.mock import MagicMock
 
@@ -14,7 +13,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from apfun.llm.client import (
-    DEFAULT_THINKING_BUDGET,
+    DEFAULT_EFFORT,
     JUDGE_MODEL,
     JUDGMENT_TASKS,
     MECHANIC_MODEL,
@@ -91,39 +90,43 @@ def test_mechanic_uses_haiku_no_thinking(make_client: Callable[..., ClientPair])
     assert "thinking" not in kwargs
 
 
-def test_judge_uses_opus_with_explicit_thinking_budget(
+def test_judge_uses_opus_with_explicit_effort(
     make_client: Callable[..., ClientPair],
 ) -> None:
+    """Per the 2026-05-22 Opus 4.7 API migration: thinking is `adaptive`,
+    effort lives under `output_config`."""
     client, mock = make_client(response=_make_response(has_thinking=True))
     client.judge(
         "synthesize",
         "sys",
         [{"role": "user", "content": "go"}],
-        thinking_budget_tokens=10_000,
+        effort="max",
     )
     kwargs = mock.messages.create.call_args.kwargs
     assert kwargs["model"] == JUDGE_MODEL
-    assert kwargs["thinking"] == {"type": "enabled", "budget_tokens": 10_000}
+    assert kwargs["thinking"] == {"type": "adaptive"}
+    assert kwargs["output_config"] == {"effort": "max"}
 
 
-@pytest.mark.parametrize(("task", "expected"), list(DEFAULT_THINKING_BUDGET.items()))
-def test_judge_per_task_default_thinking_budget(
-    make_client: Callable[..., ClientPair], task: str, expected: int
+@pytest.mark.parametrize(("task", "expected"), list(DEFAULT_EFFORT.items()))
+def test_judge_per_task_default_effort(
+    make_client: Callable[..., ClientPair], task: str, expected: str
 ) -> None:
-    """Each task in DEFAULT_THINKING_BUDGET gets its specific budget when none is passed."""
+    """Each task in DEFAULT_EFFORT gets its specific effort when none is passed."""
     client, mock = make_client()
     client.judge(task, "sys", [{"role": "user", "content": "go"}])
-    thinking = mock.messages.create.call_args.kwargs["thinking"]
-    assert thinking == {"type": "enabled", "budget_tokens": expected}
+    kwargs = mock.messages.create.call_args.kwargs
+    assert kwargs["thinking"] == {"type": "adaptive"}
+    assert kwargs["output_config"] == {"effort": expected}
 
 
-def test_judge_unknown_task_uses_fallback_budget(
+def test_judge_unknown_task_uses_fallback_effort(
     make_client: Callable[..., ClientPair],
 ) -> None:
-    """A task not in DEFAULT_THINKING_BUDGET falls back to 12000."""
+    """A task not in DEFAULT_EFFORT falls back to 'high' (project-brief default)."""
     client, mock = make_client()
     client.judge("competitor_pricing_review", "sys", [{"role": "user", "content": "go"}])
-    assert mock.messages.create.call_args.kwargs["thinking"]["budget_tokens"] == 12_000
+    assert mock.messages.create.call_args.kwargs["output_config"]["effort"] == "high"
 
 
 def test_logs_to_llm_runs_with_correct_cost(
@@ -223,37 +226,9 @@ def test_timeout_passed_per_call(make_client: Callable[..., ClientPair]) -> None
     assert mock_j.with_options.call_args.kwargs["timeout"] == 120
 
 
-def test_judge_warns_when_output_approaches_thinking_budget(
-    make_client: Callable[..., ClientPair],
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """cluster's budget is 4000; output_tokens=3700 (92%) should warn."""
-    response = _make_response(output_tokens=3_700)
-    client, _ = make_client(response=response)
-    with caplog.at_level(logging.WARNING, logger="apfun.llm.client"):
-        client.judge("cluster", "sys", [{"role": "user", "content": "x"}])
-    assert any("thinking budget" in r.getMessage() for r in caplog.records)
-
-
-def test_judge_does_not_warn_below_threshold(
-    make_client: Callable[..., ClientPair],
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Below the 90% threshold, no warning."""
-    response = _make_response(output_tokens=100)
-    client, _ = make_client(response=response)
-    with caplog.at_level(logging.WARNING, logger="apfun.llm.client"):
-        client.judge("cluster", "sys", [{"role": "user", "content": "x"}])
-    assert not any("thinking budget" in r.getMessage() for r in caplog.records)
-
-
-def test_mechanic_does_not_warn_about_thinking_budget(
-    make_client: Callable[..., ClientPair],
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """mechanic() has no thinking — never triggers the budget warning."""
-    response = _make_response(output_tokens=2_000)
-    client, _ = make_client(response=response)
-    with caplog.at_level(logging.WARNING, logger="apfun.llm.client"):
-        client.mechanic("dedup", "sys", [{"role": "user", "content": "x"}])
-    assert not any("thinking budget" in r.getMessage() for r in caplog.records)
+# The legacy thinking-budget warning tests (test_judge_warns_*,
+# test_mechanic_does_not_warn_*) were removed on 2026-05-22 when Opus 4.7
+# migrated from explicit `budget_tokens` to adaptive `output_config.effort`.
+# Effort levels are qualitative; no ">90% of budget" threshold applies.
+# The retune-trigger discipline from feedback 005 needs revisiting under
+# the new API — see draft request 018.
