@@ -1,16 +1,14 @@
-# Request 018 (DRAFT): Stage 1 empirical input + container hygiene + bug surfaced
+# Request 018: Stage 1 empirical input + three bugs surfaced + container hygiene
 
-**Status:** DRAFT — placeholders for the runbook dump output. Operator runs `docs/operator/runbooks/001-stage1-first-pass.md`, then pastes the artifacts into the marked sections below. Once filled in, rename to `018-stage1-empirical-input.md` and remove this status block.
+**Date:** 2026-05-22
 
-**Date:** 2026-05-22 (drafted), final on completion
+**Context**: Per orchestrator feedback 017, ran `docs/operator/runbooks/001-stage1-first-pass.md` to get empirical input before deciding task 011 vs 013. The runbook surfaced **three** production bugs in the first hour against real data — exactly what feedback 017 said it would buy us. All three fixed (PR #10 + PR #11, both merged). This request brings back (a) the case study of empirical-input-first working as designed, (b) the empirical artifacts from the post-fix run, (c) container hygiene items accumulated this session, and (d) the 011-vs-013 routing decision now gated on the data.
 
-**Context**: Per orchestrator feedback 017, ran runbook 001 to get empirical input before deciding task 011 vs 013. The runbook surfaced a high-severity production bug in the first hour — exactly what feedback 017 said it would buy us. Bug fixed in PR #10 (merged); runbook resumed. This request brings back (a) the empirical artifacts from the post-fix run, (b) the bug report, and (c) container hygiene items that accumulated this session.
+## Headline: three bugs found + fixed before any data was lost in production
 
-## Headline: SAVEPOINT bug found + fixed before any data was lost in production
+Surfaced by the runbook in the first hour. Validates feedback-017's empirical-input-first discipline — this is the case study.
 
-Surfaced by the runbook's "ingest reported captured=11, fresh-session count=0" diagnostic. Validates the empirical-input-first discipline.
-
-### What was broken
+### Bug #1 — SAVEPOINT-scoped rollback (PR #10, merged)
 
 Every ingester's `_insert_signal` used:
 
@@ -26,44 +24,66 @@ return True
 
 `session.rollback()` rolls back the entire transaction. When `ingest_batch` runs N queries against a single source without intermediate commits, a single content-hash collision (extremely common with HN's overlapping search queries) wipes every prior successful insert in the batch. The function returns `False` for the duplicate but the caller's `items_captured` counter — already bumped for now-erased rows — is left wrong. Final batch commit commits nothing.
 
-**Scope:** 6 sites — 5 ingesters (`reddit`, `hn`, `producthunt`, `indiehackers`, `review_sites/_common`) plus `cluster.py::_persist_clusters` (`candidate_signals` link-insert loop).
+**Scope:** 6 sites — 5 ingesters (`reddit`, `hn`, `producthunt`, `indiehackers`, `review_sites/_common`) plus `cluster.py::_persist_clusters` (the `candidate_signals` link-insert loop, which would race-drop legitimate signals on a duplicate link).
 
-### Why existing tests missed it
+**Detection:** runbook 001 produced `ingest reported captured: 11, fresh-session count: 0`.
 
-The existing dedup test (`test_dedup_on_second_run`) called `ingest()` twice with `session.commit()` between calls. By the time the second call's collisions fired, the first call's rows were already durably committed. The bug only manifests when novel and duplicate inserts share an *uncommitted* transaction — which is exactly what `ingest_batch` does in production.
+**Fix:** new `apfun.db.try_insert(session, instance) -> bool` helper that wraps `add` + `flush` in `session.begin_nested()` (a SAVEPOINT). On `IntegrityError`, only the savepoint rolls back; the surrounding transaction survives. Returns `True` on success, `False` on UNIQUE collision. Every fix site collapses to `return try_insert(session, signal)`.
 
-### Fix
+**Verification:** `ingest captured=11, fresh-session=11` (was 11 vs 0). 5 new regression tests; `test_intra_batch_collision_does_not_destroy_prior_inserts` would fail loudly on the pre-fix code.
 
-New `apfun.db.try_insert(session, instance) -> bool` helper that wraps `add` + `flush` in `session.begin_nested()` — a SAVEPOINT. On `IntegrityError`, only the savepoint rolls back; the surrounding transaction (and prior inserts) survives. Returns `True` on success, `False` on UNIQUE collision.
+**Why existing tests missed it:** the existing `test_dedup_on_second_run` called `ingest()` twice with `session.commit()` between calls. By the time the second call's collisions fired, the first call's rows were durably committed. The bug only manifests when novel and duplicate inserts share an *uncommitted* transaction — which is exactly what `ingest_batch` does in production.
 
-Every fix site collapses to:
+### Bug #2 — Markdown fence wrapping (PR #11, merged)
+
+Haiku occasionally wraps JSON in ` ```json...``` ` fences even when the prompt explicitly forbids prose/fences. Strict pydantic validation rejected every response → 3 retries × same wrap → `JSONParseError` raised, runbook blocked.
+
+**Detection:** the `llm_runs.error` field captured the truncated raw response (`'```json\n{...}\n```'`) — the feedback-016 Q3 error-logging design diagnosed the bug from the error column alone.
+
+**Fix:** new `_strip_json_fences(text)` helper (regex match for optional language tag, optional whitespace, idempotent) applied in both `judge_json` and `mechanic_json`'s parse step before `model_validate_json`. 3 new tests pin the contract.
+
+### Bug #3 — Opus 4.7 thinking API deprecation (PR #11, merged)
+
+The `thinking={"type": "enabled", "budget_tokens": N}` syntax is no longer supported by Opus 4.7. The API now requires:
 
 ```python
-return try_insert(session, signal)
+thinking={"type": "adaptive"}
+output_config={"effort": "low" | "medium" | "high" | "xhigh" | "max"}
 ```
 
-### Verification
+**Detection:** anthropic `BadRequestError: '"thinking.type.enabled" is not supported for this model'`.
 
-```
-ingest reported captured: 11
-fresh-session count: 11     # was 11 vs 0 pre-fix
-```
+**Fix:** migrated the wrapper. `DEFAULT_THINKING_BUDGET` (token-budget dict) → `DEFAULT_EFFORT` (effort-level dict). Mapping per project-brief default ("high reasoning effort"): cluster=medium, score=high, synthesize=xhigh, prd=high, architecture=high. `judge()` / `judge_json()` kwarg `thinking_budget_tokens` → `effort`. `_maybe_warn_budget` removed — see retune-trigger item in the questions section. SDK introspection of `ThinkingConfigAdaptiveParam` + `OutputConfigParam` confirmed the exact shape; `# verified 2026-05-22` on the relevant constants.
 
-5 new regression tests pin the invariant. `test_intra_batch_collision_does_not_destroy_prior_inserts` is the load-bearing one — would fail loudly on the pre-fix code.
+### Process insight (the case study)
 
-### Process insight
+These three bugs existed in production code for weeks (SAVEPOINT since task 005 in early May; fence/thinking-API for as long as Opus 4.7 has been deployed against this wrapper). They were caught **in the first hour of running against real data**. Worth flagging:
 
-The bug existed across 5 ingesters for weeks (since task 005 in early May). It was caught the first hour we ran them against real data. Worth flagging because:
-
-1. **Synthetic tests alone aren't sufficient** for catching transaction-shape bugs in DB-write paths.
-2. **The orchestrator feedback-017 read was correct** — "30-60 min of operator work is rounding error vs a wrong-task-for-two-days alternative" turned out to apply to bugs too, not just sequencing decisions.
-3. **The empirical-input-first discipline now has an unambiguous case study.** Consider adding a CLAUDE.md Lesson Learned to that effect (suggestion in the action items below).
+1. **Synthetic tests alone aren't sufficient** for catching transaction-shape bugs, LLM-quirk bugs, or upstream-API-change bugs. The tests mock the API; they mock the cadence of `session.commit()`; they mock Anthropic's quirks. All three are exactly the surfaces where bugs lived.
+2. **Feedback 017's read was correct** at a strength I didn't fully appreciate at the time — "30-60 minutes of operator work is rounding error vs a wrong-task-for-two-days alternative" was about routing, but turned out to apply to bugs too. We got three bugs for the price of one runbook.
+3. **The empirical-input-first discipline now has an unambiguous case study.** Consider adding a CLAUDE.md Lesson Learned (suggested wording in the questions section below).
 
 ---
 
-## What landed in tasks 010 + 010a (recap; orchestrator can't see PRs)
+## What landed in tasks 010 + 010a + hotfixes (recap)
 
-Same as request 017's recap — see `docs/orchestrator/017-task-011-vs-013-sequencing.md`. The state has not materially changed except for PR #10's hotfix and the runbook artifacts below.
+Tasks 010 + 010a recap: same as request 017 — see `docs/orchestrator/017-task-011-vs-013-sequencing.md`.
+
+Hotfixes since:
+
+- **PR #10** (merged 2026-05-22) — `apfun.db.try_insert` SAVEPOINT helper; 6 fix sites; 5 regression tests; `try_insert` re-exported from `apfun.db` so all 5 ingesters + `cluster.py` use it.
+- **PR #11** (merged 2026-05-22) — `_strip_json_fences` in the wrapper; `DEFAULT_THINKING_BUDGET` → `DEFAULT_EFFORT`; `judge()` / `judge_json()` accept `effort: Effort | None`; `_maybe_warn_budget` removed; tests updated; `PRICING.cache_write_5m` / `cache_write_1h` already in place from feedback 016.
+
+The wrapper API surface now is:
+
+```python
+client.judge(task, system, messages, effort="high", cache_blocks=..., cache_ttl="5m")
+client.judge_json(task, system, messages, schema=..., effort="high", cache_blocks=..., cache_ttl="5m")
+client.mechanic(task, system, messages, cache_blocks=..., ...)
+client.mechanic_json(task, system, messages, schema=..., cache_blocks=..., ...)
+```
+
+Stage 1 cluster passes `cache_ttl="1h"` to `judge_json` (multi-bucket batches cross the 5-min TTL). It does NOT yet pass `cache_blocks` — see observation 2 in the artifacts below.
 
 ---
 
@@ -355,27 +375,42 @@ If the data shifts something — e.g., clusters are reviewable BUT cost is wildl
 
 ## Specific questions
 
-1. **Routing decision.** Per matrix above, what's the next task given the candidates + cost data above?
-2. **Cost validation.** Did `llm_runs.est_cost_usd` come out where feedback 016's PRICING assumptions predicted? Anything to retune ahead of schedule?
-3. **Thinking-budget retune triggers.** Feedback 005 set retune triggers at "50 rows in llm_runs for any single task" or "judge() call hitting >90% budget warning." Were any of those tripped during the runbook? If so, retune now rather than wait for the scheduler era.
-4. **Reddit ingest** (per container hygiene #4 above) — accept-and-defer or investigate now?
-5. **Lesson Learned for CLAUDE.md.** Suggest adding: "Synthetic dedup tests don't catch transaction-shape bugs in DB-write paths. Tests that mock the `session.commit()` cadence of production code paths (not the cadence the test happens to use) catch a class of bugs synthetic tests miss." Or whatever shape the orchestrator prefers.
+1. **Routing decision.** Per matrix above, what's the next task given the candidates + cost data? My read: the 11 candidates look reviewable (real unmet needs, grounded in signal text, valid contributing IDs) — pointing toward 013+014. But formally, the orchestrator should make the call.
+2. **Cost validation.** `est_cost_usd` came out **dramatically lower than feedback 016 predicted** for Opus (~$0.013 per cluster call vs the $0.05-$0.20 range I expected). Caveat: every bucket was single-signal so input tokens were tiny (1456 avg). Don't retune PRICING from this — wait for multi-signal buckets at a larger N. **But:** with N=100+ and realistic multi-signal buckets, per-call Opus cost will likely jump 5-10×. Worth flagging so we re-validate after the first scheduler-driven Stage 1 run.
+3. **Retune-trigger discipline under adaptive thinking.** Feedback 005 set retune triggers at "50 rows in llm_runs for any single task" or "judge() call hitting >90% budget warning." Under the new `output_config.effort` API there is no explicit budget — `_maybe_warn_budget` was removed (PR #11). What's the replacement signal? Candidates: (a) track average `output_tokens` per task and warn when it exceeds a moving baseline; (b) track `effort` distribution and flag when most cluster calls hit max-effort; (c) drop the warning entirely and rely on cost-aggregate dashboards. **My lean: (c) for v1**, with the warning category coming back if/when we have enough llm_runs rows to define a baseline.
+4. **Reddit ingest** (per container hygiene #4 below) — accept-and-defer or investigate now? **Lean: accept-and-defer** (auto-disable + scheduler observability handles it gracefully in production).
+5. **Lesson Learned for CLAUDE.md.** The three-bugs-in-one-runbook case study deserves a durable entry. Suggested wording:
+
+   > **Synthetic tests don't catch surface-changing bugs.** Three categories of production bugs survived weeks of synthetic-test coverage and were caught in the first hour of runbook 001: (a) transaction-shape bugs where the test's commit cadence diverged from production's (e.g. SAVEPOINT scope), (b) LLM-quirk bugs where the stub doesn't reproduce real-model formatting quirks (e.g. markdown fences), and (c) upstream-API-change bugs where the SDK's deprecation isn't covered by mocked responses. For Stage 1+ work, plan to run new code against real data soon after writing tests — runbook-shaped empirical sessions are cheap insurance.
+
+   Or whatever shape the orchestrator prefers.
+
+6. **Cache hit ratio 0% in cluster.** `judge_json("cluster", ...)` is wired for `cache_ttl="1h"` (per feedback 016 Q2) but the stage doesn't yet pass `cache_blocks`. Small near-term optimization once prompts stabilize — pass the static system preamble + per-pass JSON-schema explanation as cache blocks. **Implementation question:** worth folding into the next-task PR (whichever 011/013/prompt-iter wins), or treat as a follow-up?
+
+7. **Singleton buckets at N=11.** Either Haiku's keyword sets are too specific OR the input is genuinely diverse. Plausibility says the latter at N=11; not yet a problem. **Re-validation gate:** if Stage 1 keeps producing 1:1 signal-to-candidate at N=100+, that's the signal that `cluster.j2`'s keyword-set instruction needs tightening (lean toward "abstract domain-level keywords" rather than "concrete tokens from the post"). Track this in the next-cluster-PR's PR description.
 
 ## What I would do next without intervention
 
 Per the routing matrix:
 
-- **70%+ reviewable** → cut `feature/task-013-admin-ui-base` (probably bundled with 014 per request 017's Q2 lean).
+- **70%+ reviewable** → cut `feature/task-013-admin-ui-base` (bundled with 014 per feedback 017's Q2 lean). My read: this is where we are.
 - **Noticeably noisy** → cut `feature/task-011-stage2-demand-check`.
 - **Unusable** → cut `feature/prompt-iteration-cluster` and use `scripts/replay_clustering.py` to iterate against the captured `signal_text` state from this runbook run.
 
 The branch name and first-commit plan depend on the answer to Q1.
 
+If the orchestrator confirms 013+014 bundled, I'd ship a single PR with:
+- `apfun/web/routes/`, `apfun/web/templates/`, Tailwind build (per task 013 spec)
+- `/inbox` endpoint listing pending candidates + approve/reject HTMX mutations (per task 014 spec — not yet specced beyond the file index, will draft inline in the implementation)
+- A `signals_since_rejection` UI computation using `candidate_signals.created_at > approvals.decided_at` per feedback 016 Q5
+- Browser smoke test per the CLAUDE.md UI-testing convention
+
 ## Relevant files
 
-- branch `notes/request-018-stage1-empirical-draft` (this draft file only)
-- PR #10 (SAVEPOINT hotfix) — assumed merged before request 018 is filed
-- `docs/operator/runbooks/001-stage1-first-pass.md` — the runbook that surfaced everything above
-- `scripts/dump_run_artifacts.py` — produces the empirical sections
-- `apfun/pipeline/cluster.py` + prompts — the system under test
-- `docs/orchestrator/INDEX.md` — row 018 → open after this commit is renamed and posted
+- `docs/operator/runbooks/001-stage1-first-pass.md` — the runbook
+- `scripts/dump_run_artifacts.py` — produced the empirical sections above
+- `apfun/llm/client.py` — wrapper after PR #11 (adaptive thinking + fence strip)
+- `apfun/db.py` — `try_insert` SAVEPOINT helper (PR #10)
+- `apfun/pipeline/cluster.py` + `apfun/llm/prompts/cluster.j2` — the system under test
+- `data/apfun.db` — contains the 11 candidates + 11 signal_text rows + llm_runs / scheduler_runs for the runbook session, ready to feed task 014 (inbox endpoint) when that ships
+- `docs/orchestrator/INDEX.md` — row 018 → open after this PR opens
