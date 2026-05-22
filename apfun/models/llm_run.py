@@ -45,3 +45,7 @@ class LLMRun(Base, IdMixin, TimestampMixin):
     )
     ok: Mapped[bool] = mapped_column(Boolean, nullable=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Adaptive-thinking effort level for `judge()` calls. NULL for mechanic
+    # calls (Haiku doesn't use thinking). Records what the wrapper sent so
+    # post-hoc cost/quality analysis can group by effort. Per feedback 018 Q3.
+    effort: Mapped[str | None] = mapped_column(String(10), nullable=True)

@@ -529,6 +529,7 @@ class LLMClient:
                     candidate_id=candidate_id,
                     error=f"{type(e).__name__}: {e}",
                     retry_log_json=retry_log,
+                    effort=effort,
                 )
                 raise
             except anthropic.APIError as e:
@@ -541,6 +542,7 @@ class LLMClient:
                     candidate_id=candidate_id,
                     error=f"{type(e).__name__}: {e}",
                     retry_log_json=retry_log,
+                    effort=effort,
                 )
                 raise
 
@@ -583,6 +585,7 @@ class LLMClient:
                         candidate_id=candidate_id,
                         error=f"JSONParseError: {e}\nraw_response[:2000]={e.raw_response!r}",
                         retry_log_json=retry_log,
+                        effort=effort,
                     )
                     raise
 
@@ -605,6 +608,7 @@ class LLMClient:
                     cache_ttl=cache_ttl,
                 ),
                 retry_log_json=retry_log,
+                effort=effort,
             )
             return parsed
 
@@ -625,6 +629,7 @@ class LLMClient:
         cache_write_tokens: int,
         est_cost_usd: float,
         retry_log_json: list[dict[str, Any]],
+        effort: Effort | None,
     ) -> None:
         with self._session_factory() as s:
             s.add(
@@ -642,6 +647,7 @@ class LLMClient:
                     ok=True,
                     error=None,
                     retry_log_json=retry_log_json,
+                    effort=effort,
                 )
             )
             s.commit()
@@ -656,6 +662,7 @@ class LLMClient:
         candidate_id: int | None,
         error: str,
         retry_log_json: list[dict[str, Any]],
+        effort: Effort | None,
     ) -> None:
         with self._session_factory() as s:
             s.add(
@@ -668,6 +675,7 @@ class LLMClient:
                     ok=False,
                     error=error,
                     retry_log_json=retry_log_json,
+                    effort=effort,
                 )
             )
             s.commit()
