@@ -106,3 +106,11 @@ For each emitted `IdeaCard`:
 - Cost ceiling is soft (cap + log + pause); no monthly hard ceiling yet. Acceptable for v1; revisit when usage exists.
 - Post-merge action item (per feedback 016 risk profile): after first scheduled run, open a brief orchestrator request with `llm_runs` cost numbers + bucket-count distribution. Validates PRICING and informs first thinking-budget retune.
 - Prompts will need 2-3 rounds of refinement against real data. `replay_clustering.py` exists so refinement doesn't require re-running the upstream pipeline.
+
+### Pending optimizations / re-validation gates (per feedback 018)
+
+After the first scheduler-driven Stage 1 run accumulates N=100+ rows in `llm_runs`, three items get re-evaluated together (likely in a single follow-up orchestrator turn):
+
+1. **Wire `cache_blocks` in `judge_json("cluster", ...)`.** Currently `cache_ttl="1h"` is set but `cache_blocks` isn't passed → 0% cache hit ratio observed in runbook 001 (per feedback 018 Q6). Pass the static system preamble + JSON-schema explanation as cache blocks once prompts stabilize. Worth measurable cost savings on multi-bucket batches.
+2. **Vertical label drift.** Haiku emits `source.vertical` as a freeform string. Runbook 001 produced both `"recruiting"` and `"hiring"` for the same vertical at N=11. If the unique-vertical count exceeds ~20 at N=100+, constrain to a fixed taxonomy via `VERTICALS = Literal[...]` allowlist in `SignalCoreComplaint` with "other" as fallback. Per feedback 018 observation.
+3. **Singleton-bucket re-validation.** Runbook 001 produced 1:1 signal-to-candidate (every signal → its own bucket → its own candidate). Expected at low N with HN's diverse-content shape. If this persists at N=100+ with Reddit/review-site data flowing, the keyword-set instruction in `cluster.j2` is too narrow and needs to push toward abstract domain-level keywords. Per feedback 018 Q7.

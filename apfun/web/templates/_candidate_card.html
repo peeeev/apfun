@@ -1,0 +1,57 @@
+{# Single candidate card — used by the inbox list AND by HTMX swaps after approve/reject. #}
+{# Caller passes `c` (the candidate view dict) and optional `show_actions` (default True). #}
+<article class="candidate-card" data-decision="{{ c.decision }}" id="candidate-{{ c.id }}">
+  <header class="flex items-start justify-between gap-3">
+    <h3 class="text-base font-mono leading-snug">{{ c.problem_statement }}</h3>
+    <div class="flex flex-col items-end gap-1">
+      <span class="tag tag-vertical">{{ c.vertical or "no-vertical" }}</span>
+      <span class="tag tag-signals">{{ c.signals_total }} signal{{ '' if c.signals_total == 1 else 's' }} · w={{ "%.0f"|format(c.weight_total) }}</span>
+      {% if c.decision == "rejected" and c.signals_since_rejection > 0 %}
+        <span class="tag tag-alert">+{{ c.signals_since_rejection }} since rejection</span>
+      {% endif %}
+    </div>
+  </header>
+
+  <p class="text-xs text-zinc-400 mt-2 font-mono">
+    {{ c.suspected_user or "user not identified" }}
+    {% if c.seed_keywords %}
+      <span class="text-zinc-500"> · {{ c.seed_keywords|join(', ') }}</span>
+    {% endif %}
+  </p>
+
+  {% if c.signals_preview %}
+    <ul class="mt-3 space-y-2">
+      {% for sig in c.signals_preview %}
+        <li class="text-xs text-zinc-300 leading-snug">
+          <span class="text-zinc-500 font-mono">[{{ sig.source_kind }} w={{ "%.0f"|format(sig.weight) }}]</span>
+          {{ sig.text[:300] }}{% if sig.text|length > 300 %}…{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  {% if show_actions is not defined or show_actions %}
+    {% if c.decision == "pending" %}
+      <div class="flex items-center gap-2 mt-3">
+        <button class="btn btn-approve"
+                hx-post="/inbox/{{ c.id }}/approve"
+                hx-target="#candidate-{{ c.id }}"
+                hx-swap="outerHTML">approve</button>
+        <button class="btn btn-reject"
+                hx-post="/inbox/{{ c.id }}/reject"
+                hx-target="#candidate-{{ c.id }}"
+                hx-swap="outerHTML">reject</button>
+      </div>
+    {% elif c.decision == "rejected" and c.signals_since_rejection > 0 %}
+      <div class="flex items-center gap-2 mt-3">
+        <p class="text-xs text-amber-300">{{ c.signals_since_rejection }} new signals since you rejected — re-review?</p>
+        <button class="btn btn-resurrect"
+                hx-post="/inbox/{{ c.id }}/approve"
+                hx-target="#candidate-{{ c.id }}"
+                hx-swap="outerHTML">approve now</button>
+      </div>
+    {% endif %}
+  {% else %}
+    <p class="text-xs text-zinc-500 mt-3 font-mono">decision: {{ c.decision }}</p>
+  {% endif %}
+</article>

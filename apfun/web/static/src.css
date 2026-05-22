@@ -1,0 +1,9 @@
+/* Tailwind source. Compiled to `app.css` by `scripts/build_css.sh` using the
+ * Tailwind standalone CLI (no Node). For now `app.css` is the source of truth
+ * for what's actually served — this file documents the intended workflow.
+ *
+ * Per `docs/tasks/013-admin-ui-base.md`.
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

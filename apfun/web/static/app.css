@@ -1,0 +1,132 @@
+/* Hand-curated subset of Tailwind utility classes for the apfun admin UI.
+ *
+ * This file is committed directly (not built via the standalone CLI yet) —
+ * the build pipeline is documented in `scripts/build_css.sh` but the
+ * static asset is the source of truth for what's served until/unless we
+ * exceed what's reasonable to maintain by hand.
+ *
+ * Dense info layout: monospace headings, tight line-height, no animations
+ * beyond HTMX's built-in opacity swap. Dark mode default.
+ *
+ * Per `docs/tasks/013-admin-ui-base.md`.
+ */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Code", "Roboto Mono", monospace; }
+.font-sans { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.font-bold { font-weight: 700; }
+
+body { line-height: 1.5; min-height: 100vh; }
+
+/* Colors — zinc dark palette + zinc-50 for text */
+.bg-zinc-950 { background-color: #09090b; }
+.bg-zinc-900 { background-color: #18181b; }
+.bg-zinc-800 { background-color: #27272a; }
+.bg-zinc-700 { background-color: #3f3f46; }
+.bg-emerald-900 { background-color: #064e3b; }
+.bg-red-900 { background-color: #7f1d1d; }
+.bg-amber-900 { background-color: #78350f; }
+.text-zinc-100 { color: #f4f4f5; }
+.text-zinc-300 { color: #d4d4d8; }
+.text-zinc-400 { color: #a1a1aa; }
+.text-zinc-500 { color: #71717a; }
+.text-white { color: #fff; }
+.text-emerald-300 { color: #6ee7b7; }
+.text-red-300 { color: #fca5a5; }
+.text-amber-300 { color: #fcd34d; }
+.text-amber-400 { color: #fbbf24; }
+.border-zinc-700 { border-color: #3f3f46; }
+.border-zinc-800 { border-color: #27272a; }
+
+/* Layout primitives */
+.flex { display: flex; }
+.inline-flex { display: inline-flex; }
+.grid { display: grid; }
+.hidden { display: none; }
+.block { display: block; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.justify-between { justify-content: space-between; }
+.gap-1 { gap: 0.25rem; }
+.gap-2 { gap: 0.5rem; }
+.gap-3 { gap: 0.75rem; }
+.gap-4 { gap: 1rem; }
+.gap-6 { gap: 1.5rem; }
+.flex-wrap { flex-wrap: wrap; }
+.flex-col { flex-direction: column; }
+
+/* Spacing */
+.px-1 { padding-left: 0.25rem; padding-right: 0.25rem; }
+.px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+.px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+.px-4 { padding-left: 1rem; padding-right: 1rem; }
+.py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+.py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+.py-6 { padding-top: 1.5rem; padding-bottom: 1.5rem; }
+.p-4 { padding: 1rem; }
+.mt-1 { margin-top: 0.25rem; }
+.mt-2 { margin-top: 0.5rem; }
+.mt-3 { margin-top: 0.75rem; }
+.mt-4 { margin-top: 1rem; }
+.mb-2 { margin-bottom: 0.5rem; }
+.mb-4 { margin-bottom: 1rem; }
+.space-y-2 > * + * { margin-top: 0.5rem; }
+.space-y-3 > * + * { margin-top: 0.75rem; }
+.space-y-4 > * + * { margin-top: 1rem; }
+.max-w-5xl { max-width: 64rem; }
+.mx-auto { margin-left: auto; margin-right: auto; }
+
+/* Typography */
+.text-xs { font-size: 0.75rem; line-height: 1rem; }
+.text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+.text-base { font-size: 1rem; line-height: 1.5rem; }
+.text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+.text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+.text-2xl { font-size: 1.5rem; line-height: 2rem; }
+.tracking-tight { letter-spacing: -0.025em; }
+.uppercase { text-transform: uppercase; }
+.leading-snug { line-height: 1.375; }
+
+/* Borders, radii */
+.border { border-width: 1px; border-style: solid; }
+.border-b { border-bottom-width: 1px; border-bottom-style: solid; }
+.border-t { border-top-width: 1px; border-top-style: solid; }
+.rounded { border-radius: 0.25rem; }
+.rounded-md { border-radius: 0.375rem; }
+.rounded-lg { border-radius: 0.5rem; }
+
+/* Buttons / hover */
+a, button { color: inherit; text-decoration: none; }
+button { background: none; border: 1px solid transparent; cursor: pointer; font: inherit; }
+button:hover, a:hover { text-decoration: none; }
+.hover\:text-white:hover { color: #fff; }
+.hover\:bg-zinc-800:hover { background-color: #27272a; }
+.hover\:bg-emerald-800:hover { background-color: #065f46; }
+.hover\:bg-red-800:hover { background-color: #991b1b; }
+.cursor-pointer { cursor: pointer; }
+
+/* HTMX-friendly: smooth opacity swap on transitions */
+.htmx-swapping { opacity: 0.4; transition: opacity 100ms ease-out; }
+
+/* Per-component shortcuts used in templates */
+.candidate-card { border: 1px solid #27272a; border-radius: 0.5rem; padding: 1rem; }
+.candidate-card[data-decision="approved"] { border-left: 4px solid #6ee7b7; }
+.candidate-card[data-decision="rejected"] { border-left: 4px solid #fca5a5; }
+.candidate-card[data-decision="auto_killed"] { border-left: 4px solid #71717a; }
+.candidate-card[data-decision="pending"] { border-left: 4px solid #fcd34d; }
+
+.btn { display: inline-flex; align-items: center; padding: 0.25rem 0.75rem; border-radius: 0.375rem; font-size: 0.875rem; font-weight: 500; }
+.btn-approve { background-color: #064e3b; color: #6ee7b7; }
+.btn-approve:hover { background-color: #065f46; color: #fff; }
+.btn-reject { background-color: #7f1d1d; color: #fca5a5; }
+.btn-reject:hover { background-color: #991b1b; color: #fff; }
+.btn-resurrect { background-color: #78350f; color: #fcd34d; }
+.btn-resurrect:hover { background-color: #92400e; color: #fff; }
+
+.tag { display: inline-flex; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; background-color: #27272a; color: #a1a1aa; }
+.tag-vertical { background-color: #1e3a8a; color: #93c5fd; }
+.tag-signals { background-color: #18181b; color: #d4d4d8; }
+.tag-alert { background-color: #78350f; color: #fcd34d; }
