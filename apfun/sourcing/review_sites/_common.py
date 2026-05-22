@@ -29,9 +29,9 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, NotRequired, TypedDict
 
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from apfun.db import try_insert
 from apfun.models import RawSignal, SchedulerRun, Source
 from apfun.sourcing._base import (
     BrowserBatchClient,
@@ -303,13 +303,7 @@ def _insert_review(session: Session, source: Source, review: ReviewDict) -> bool
         content_hash=digest,
         payload_json=payload,
     )
-    session.add(signal)
-    try:
-        session.flush()
-    except IntegrityError:
-        session.rollback()
-        return False
-    return True
+    return try_insert(session, signal)
 
 
 def _apply_batch_health_updates(sources: list[Source], results: list[IngestResult]) -> None:

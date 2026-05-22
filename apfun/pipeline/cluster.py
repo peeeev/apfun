@@ -33,9 +33,9 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from apfun.db import try_insert
 from apfun.llm import prompts
 from apfun.llm.client import LLMClient
 from apfun.models import (
@@ -379,13 +379,8 @@ def _persist_clusters(
                 candidate_id=candidate.id,
                 raw_signal_id=sig.raw_signal_id,
             )
-            session.add(link)
-            try:
-                session.flush()
+            if try_insert(session, link):
                 linked += 1
-            except IntegrityError:
-                # Race or duplicate link; not a fatal condition.
-                session.rollback()
     session.commit()
     return inserted, linked
 
