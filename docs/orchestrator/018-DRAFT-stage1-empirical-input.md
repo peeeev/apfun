@@ -73,42 +73,226 @@ Same as request 017's recap — see `docs/orchestrator/017-task-011-vs-013-seque
 
 ### Candidates — representative sample
 
-[OPERATOR: paste ~10 candidates from the CANDIDATES section of the dump.
-Pick 2-3 best-looking, 2-3 worst-looking, 4-5 median. Include full
-problem_statement + contributing signals.]
+Captured 2026-05-22T01:07Z via `scripts/dump_run_artifacts.py` after PR #11 hotfixes (fence-strip + adaptive-thinking migration) landed. Run summary:
+
+- **Source:** 3 HN sources (`hn:wishes`, `hn:ask-hn`, `hn:alternatives`), 11 raw_signals captured.
+- **Normalize:** 11 → 11 `signal_text` rows (all HN, none `is_low_signal`).
+- **Cluster:** 11 signals → **11 buckets → 11 candidates → 11 signal links**. Every signal got its own keyword set; no actual clustering happened. Cost: **$0.19 total**, latency 77.6s.
+- **Reddit ingest:** all 3 sources 403'd (UA-block fired). Skipped per Reddit-403 fallback in runbook caveat. HN-only data below.
 
 ```
-[paste here]
+### Candidate #1  (dedup_key=a-self-taught-remote-software-engineer-based-in-iraq-...)
+  decision: pending  pipeline_stage: none  vertical: recruiting
+  problem_statement:
+    A self-taught remote software engineer based in Iraq describes being unable to land
+    even unpaid roles despite extensive applications, open-source contributions, and SaaS
+    attempts. The pain is a brutally competitive remote job market inflated by AI-raised
+    expectations, compounded by fake job postings, time-wasting agencies, and useless
+    application forms, leaving capable developers from emerging markets with no viable
+    path to meaningful work.
+  suspected_user: self-taught remote software engineers in emerging markets
+  seed_keywords: ['remote developer jobs', 'fake job postings', 'job application fatigue',
+                  'remote hiring scams', 'international developer hiring', 'ai job market']
+  contributing signals (1):
+    [1] (hn, weight=6) Peak unemployment for a software engineer. What did I do wrong?
+        Back in 2019, I was a CS student in Iraq. I taught myself Node.js, React, and
+        TypeScript. Then in 2020, the pandemic started, and honestly, it was perfect
+        timing for me because suddenly a lot of local businesses needed delivery web apps…
+
+### Candidate #2  (dedup_key=developers-on-teams-with-only-a-shared-claude-subscription-...)
+  decision: pending  pipeline_stage: none  vertical: dev-tools
+  problem_statement:
+    Developers on teams with only a shared Claude subscription lack access to dedicated
+    spec-driven development tooling like Kiro, and have to hack together their own SDD
+    workflows on top of Claude because affordable, portable SDD management across AI
+    coding tools isn't available.
+  suspected_user: solo developers and small teams sharing a single Claude subscription
+  seed_keywords: ['spec-driven development', 'claude skill', 'kiro alternative',
+                  'ai coding workflow', 'sdd management']
+  contributing signals (1):
+    [1] (hn, weight=16) Show HN: I Made a Claude Skill for Spec-Driven Development (SDD)
+        At my work they provided a single Claude subscription for everyone on the team.
+        To be honest I like kiro better as it provides a way better SDD management. But
+        the company can't provide it and I can't afford it yet. Turns out…
+
+### Candidate #3  (dedup_key=developers-seeking-real-human-help-...)
+  decision: pending  pipeline_stage: none  vertical: dev-tools
+  problem_statement:
+    Developers seeking real human help on technical problems (e.g. reporting malware repos
+    on GitHub, asking colleagues for guidance, or messaging strangers online) are
+    increasingly receiving low-effort, copy-pasted AI-generated responses that don't
+    address their actual question, leaving them unable to distinguish human expertise
+    from AI noise and unable to get substantive help.
+  suspected_user: developers seeking peer help in online technical communities
+  seed_keywords: ['ai-generated answers', 'github discussions', 'low-effort replies',
+                  'human verification', 'chatgpt copy paste', 'malware reporting']
+  contributing signals (1):
+    [1] (hn, weight=135) Tell HN: I'm tired of AI-generated answers. I found GitHub
+        repositories that were spreading malware. I asked AI what I should do about it,
+        but it gave me nothing useful. So I opened a discussion on GitHub. Someone
+        replied. It was literally the exact same text the AI had given me…
+
+### Candidate #4  (dedup_key=an-experienced-asp-net-full-stack-developer-...)
+  decision: pending  pipeline_stage: none  vertical: hiring
+  problem_statement:
+    An experienced ASP.NET full-stack developer with ~7 years of experience (including
+    founding a startup) is struggling to convert job applications into offers — ~100
+    applications, only 8 interviews, and recent interviews going poorly due to coding
+    exercise mishaps (IDE crashing during screen share) and design choices not matching
+    interviewer expectations.
+  suspected_user: mid-level ASP.NET / .NET developers job-hunting in regional UK markets
+  seed_keywords: ['asp.net interview prep', 'mid-level swe job search',
+                  'coding interview failure', '.net technical screening']
+  contributing signals (1): [hn, weight=23] Ask HN: Failing interviews for mid-level SWE
+                            in UK, advice please…
+
+### Candidate #5  (dedup_key=developers-and-security-teams-lack-visibility-...)
+  decision: pending  pipeline_stage: none  vertical: dev-tools
+  problem_statement:
+    Developers and security teams lack visibility into the security posture of IDE
+    extensions installed on workstations — including what permissions extensions acquire,
+    whether they run post-install scripts, what dependencies they pull in, and whether
+    those have known vulnerabilities.
+  suspected_user: security teams responsible for developer workstation security
+  seed_keywords: ['ide extension security', 'malicious vscode extension',
+                  'workstation security', 'extension permissions']
+  contributing signals (1): [hn, weight=3] Show HN: IDEViewer – Security scanner for
+                            malicious IDE Extensions…
+
+### Candidate #6  (dedup_key=experienced-developers-who-have-shifted-to-using-coding-agents-...)
+  decision: pending  pipeline_stage: none  vertical: dev-tools
+  problem_statement:
+    Experienced developers who have shifted to using coding agents end-to-end report a
+    loss of flow, challenge, and engagement in their work. They feel bored and empty
+    because the cognitive parts of coding (architecting, tracing data flows, problem-
+    solving) are now offloaded to agents like Codex/Opus, yet they can't simply 'use it
+    less' without falling behind peers on productivity.
+  suspected_user: experienced developers whose day-to-day coding has been largely taken
+                  over by AI agents
+  seed_keywords: ['coding agents', 'developer boredom', 'ai disengagement', 'loss of flow']
+  contributing signals (1): [hn, weight=15] Ask HN: Anyone else struggling with AI and
+                            work?…
+
+### Candidate #7  (dedup_key=writers-and-creators-want-a-low-friction-way-...)
+  decision: pending  pipeline_stage: none  vertical: unknown
+  problem_statement:
+    Writers and creators want a low-friction way to prove their long-form content (blog
+    posts, articles, images) was made by a human rather than AI, as casual cues like
+    polish or 'tells' are becoming unreliable and current workarounds (screen recordings,
+    typewriter drafts, deliberately unpolished prose) add significant overhead.
+  suspected_user: independent writers and bloggers posting on public forums
+  seed_keywords: ['proof of human writing', 'human-made content', 'ai detection workaround',
+                  'writing provenance', 'content authenticity']
+  contributing signals (1): [hn, weight=10] Ask HN: How are you proving your writing is
+                            human made?…
+
+### Candidate #8  (dedup_key=learners-and-practitioners-entering-offline-password-cracking-...)
+  decision: pending  pipeline_stage: none  vertical: security
+  problem_statement:
+    Learners and practitioners entering offline password cracking cannot find a single
+    comprehensive resource that explains modern hashing algorithms (including memory-hard
+    ones like Argon2), Hashcat workflows, password analysis, and attack optimization in
+    one place; existing knowledge is scattered across YouTube videos, blogs, forums,
+    academic papers, and presentations.
+  suspected_user: self-taught penetration testers and password-cracking learners
+  seed_keywords: ['hashcat tutorial', 'offline password cracking', 'argon2 gpu cracking',
+                  'password hashing guide']
+  contributing signals (1): [hn, weight=288] Show HN: I Dedicated 4 Years to Mastering
+                            Offline Password Cracking…
+
+### Candidate #9  (dedup_key=a-passive-investor-is-grappling-with-the-implications-...)
+  decision: pending  pipeline_stage: none  vertical: unknown
+  problem_statement:
+    A passive investor is grappling with the implications of index funds changing rules
+    to allow immediate inclusion of IPOs (triggered by the SpaceX IPO), and lacks clear
+    guidance on how to navigate this shift both as a passive investor and in
+    understanding downstream effects on startups and entrepreneurship.
+  suspected_user: passive retail investors tracking index fund mechanics
+  seed_keywords: ['index fund ipo inclusion', 'passive investing', 'mega ipo',
+                  'spacex ipo', 'index rule changes']
+  contributing signals (1): [hn, weight=10] Ask HN: How to make the best of the Mega IPO
+                            / Index fund debacle?…
+
+### Candidate #10  (dedup_key=mainstream-social-networks-...)
+  decision: pending  pipeline_stage: none  vertical: social-network
+  problem_statement:
+    Mainstream social networks (Facebook, Twitter, Instagram, VK) have drifted from
+    helping people stay updated on friends' lives into ad-driven 'social media' that
+    shoves strangers, news, businesses, and brainrot at users; there is no good modern
+    platform that simply lets you hang out with friends and meet people in groups the
+    way early Facebook did.
+  suspected_user: people who want a friends-and-groups social network rather than an
+                  algorithmic media feed
+  seed_keywords: ['fediverse', 'activitypub', 'early facebook', 'friends-only social
+                  network', 'decentralized social', 'anti-enshittification']
+  contributing signals (1): [hn, weight=8] Show HN: Smithereen – an early-Facebook-style
+                            Fediverse server…
+
+### Candidate #11  (dedup_key=users-are-frustrated-that-mainstream-search-engines-...)
+  decision: pending  pipeline_stage: none  vertical: search
+  problem_statement:
+    Users are frustrated that mainstream search engines (Google) and even privacy-focused
+    alternatives (DuckDuckGo, Startpage, Ecosia, Mojeek, Marginalia) are now cluttered
+    with ads and AI Overviews, with AI features enabled by default requiring users to
+    opt out feature-by-feature.
+  suspected_user: power users dissatisfied with mainstream and privacy search engines
+  seed_keywords: ['independent search engine', 'ai overview opt out', 'search ads',
+                  'user control search', 'custom ranking']
+  contributing signals (1): [hn, weight=5] Show HN: My independent search engine focused
+                            on user control…
 ```
 
 ### llm_runs aggregates
 
-[OPERATOR: paste the entire LLM_RUNS AGGREGATES section. Include the cache
-hit ratio line and the GRAND TOTAL COST line.]
-
 ```
-[paste here]
+  task            calls   in/avg   in/max  out/avg  out/max   cache_rd   cache_wr   cost_usd  attempts
+  ----------------------------------------------------------------------------------------------------
+  cluster            12     1456     2287      241      313          0          0     0.1598        12
+  dedup              23      899     1499       81      103          0          0     0.0301        25
+
+  Cache hit ratio: 0.0%  (read=0, write=0)
+  GRAND TOTAL COST: $0.1899
+
+  ⚠️  2 failed call(s) (both fixed via PR #11):
+       - cluster: JSONParseError (Haiku fence-wrapping bug)
+       - cluster: BadRequestError (Opus 4.7 thinking API deprecation)
 ```
 
 ### scheduler_runs
 
-[OPERATOR: paste the SCHEDULER_RUNS section.]
-
 ```
-[paste here]
+  ✓ runbook.reddit_ingest        items=   0 dur=   195ms   (UA-block fired)
+  ✓ runbook.hn_ingest            items=  13 dur=  4381ms   (pre-SAVEPOINT bug — rows rolled back)
+  ✓ runbook.hn_ingest            items=  11 dur=  4355ms   (pre-SAVEPOINT bug — rows rolled back)
+  ✓ runbook.hn_ingest_diag       items=  11 dur=  4424ms   (verified the rollback)
+  ✓ runbook.hn_ingest_postfix    items=  11 dur=  4490ms   (post-PR #10, rows persisted)
+  ✓ runbook.hn_ingest_diag       items=   0 dur=  4319ms   (re-run, all dedupe-skipped)
+  ✓ runbook.hn_ingest            items=   0 dur=  9253ms   (re-run, all dedupe-skipped)
+  ✓ pipeline.normalize           items=  11 dur=    12ms
+  ✗ runbook.cluster              items=   0 dur=  7950ms   (Haiku fence bug)
+  ✗ runbook.cluster_postfix      items=  11 dur= 16874ms   (Opus thinking-API bug)
+  ✓ runbook.cluster_postfix2     items=  11 dur= 77586ms   (post-PR #11, all candidates persisted)
 ```
 
 ### Operational observations
 
-[OPERATOR: free-form. Things to consider mentioning:]
+1. **No clustering at N=11.** Every signal landed in its own bucket → its own candidate. Either Haiku is emitting overly-specific keyword sets, or the 11 HN posts are genuinely too diverse to share buckets. Skimming the candidates, the latter is plausible (recruiting, dev-tools, security, social-network, search, finance — wide spread). Worth re-running with 100+ signals once batches are bigger; the 1:1 signal-to-candidate shape would be problematic if it persists.
 
-- Did `JSONParseError` retries fire? (look for `attempts > 1` in llm_runs)
-- Did `result.capped` come back True from cluster_signals? (was bucket count > 50?)
-- Anything in the log output that "looked weird"?
-- Per-call cost vs expectation: Haiku dedup calls should be ~$0.001 each; Opus cluster calls ~$0.05-$0.20 each. Was that roughly true?
-- Were the Stage 1 latencies sensible? (~5-20s per Opus call with thinking)
+2. **Cache hit ratio: 0%.** Stage 1's `judge_json` calls don't pass `cache_blocks`, so the `cache_ttl="1h"` infrastructure (built per feedback 016 Q2) is wired but inert. Low-hanging optimization once prompts stabilize — pass the system preamble + the dedup-signal prompt template as `cache_blocks`.
 
-[paste here]
+3. **Per-call cost** roughly tracked expectation:
+   - Haiku dedup: ~$0.001 per signal (matches feedback 016 prediction)
+   - Opus cluster: ~$0.013 per bucket — much lower than predicted ($0.05-0.20). Reason: tiny inputs (1456 avg tokens) since every bucket was single-signal. With realistic multi-signal buckets, per-call cost grows linearly. Sample doesn't validate Opus cost-per-cluster yet.
+
+4. **Two failed `llm_runs` rows captured the bugs we hit (already fixed):**
+   - Haiku markdown-fence wrapping → `JSONParseError` retry loop exhausted (3 attempts) → final failure recorded with truncated `raw_response`. The error-logging pattern from feedback 016 Q3 worked exactly as designed — bug was diagnosable from the `llm_runs.error` field alone.
+   - Opus 4.7 deprecated `thinking.type="enabled"` + `budget_tokens` in favor of `thinking.type="adaptive"` + `output_config.effort`. Caught immediately by the wrapper as `BadRequestError`.
+
+5. **Bug case study — 3 bugs in 1 runbook session.** SAVEPOINT-scoped rollback (PR #10), JSON-fence stripping (PR #11), and adaptive-thinking migration (PR #11). All three would have silently degraded production data or crashed the scheduler. The runbook caught them in the first hour against real data; synthetic tests had missed all three for weeks (since task 005 / task 010 respectively). This is the case study for the empirical-input-first discipline.
+
+6. **Stage 1 latency** was 77.6s for 11 buckets ≈ 7.0s per Opus call. Within the spec's expected range. Larger batches would amortize the per-call overhead.
+
+7. **Reddit ingest** continues to 403 from the dev container's IP. See container hygiene #4 below for options.
 
 ---
 
