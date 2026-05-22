@@ -59,3 +59,27 @@ def session(engine: Engine) -> Iterator[Session]:
     factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     with factory() as s:
         yield s
+
+
+@pytest.fixture(autouse=True)
+def _stub_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace `apfun.main.start_scheduler` with a no-op stub.
+
+    Any test that constructs a `TestClient(apfun.main.app)` enters the
+    FastAPI lifespan handler, which calls `start_scheduler()`. The real
+    scheduler would touch the prod DB jobstore and spin a worker thread —
+    neither belongs in unit tests. Tests of the scheduler itself build
+    their own `BackgroundScheduler` explicitly and don't go through `app`.
+
+    autouse: applies to every test even when no FastAPI client is built.
+    The monkeypatch is cheap; tests that don't import `apfun.main` are
+    unaffected.
+    """
+
+    class _StubScheduler:
+        running = True
+
+        def shutdown(self, *, wait: bool = True) -> None:
+            self.running = False
+
+    monkeypatch.setattr("apfun.main.start_scheduler", lambda: _StubScheduler())

@@ -1,0 +1,13 @@
+{% extends "_base.html" %}
+{% block title %}{{ heading|lower }} · apfun{% endblock %}
+{% block content %}
+<section class="space-y-4">
+  <header>
+    <h1 class="text-xl font-bold font-mono tracking-tight">{{ heading }}</h1>
+  </header>
+  <div class="text-sm text-zinc-400 space-y-2">
+    <p>{{ tagline }}</p>
+    <p class="text-xs text-zinc-500">Coming in task {{ task_id }}.</p>
+  </div>
+</section>
+{% endblock %}
