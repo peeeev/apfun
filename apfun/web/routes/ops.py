@@ -294,7 +294,10 @@ def _collect(session: Session) -> dict[str, Any]:
                 "started": _fmt_rel(r.started_at, now=now_for_rel),
                 "job_id": r.job_id,
                 "ok": r.ok,
-                "items": r.items_processed,
+                # Key name avoids the dict-method collision: a key called
+                # "items" would render as `<built-in method items of dict>`
+                # because Jinja2 resolves `r.items` via getattr first.
+                "items_processed": r.items_processed,
                 "error": r.error,
             }
             for r in recent_runs

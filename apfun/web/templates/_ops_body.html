@@ -67,7 +67,7 @@
             <td title="{{ r.started.abs }}">{{ r.started.rel }}</td>
             <td class="font-mono">{{ r.job_id }}</td>
             <td>{% if r.ok %}<span class="text-emerald-300">✓</span>{% else %}<span class="text-red-300">✗</span>{% endif %}</td>
-            <td>{{ r.items if r.items is not none else "—" }}</td>
+            <td>{{ r.items_processed if r.items_processed is not none else "—" }}</td>
             <td class="ops-err" title="{{ r.error or '' }}">{{ (r.error or "")[:80] }}</td>
           </tr>
         {% endfor %}
