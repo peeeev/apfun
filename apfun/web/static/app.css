@@ -125,6 +125,9 @@ button:hover, a:hover { text-decoration: none; }
 .btn-reject:hover { background-color: #991b1b; color: #fff; }
 .btn-resurrect { background-color: #78350f; color: #fcd34d; }
 .btn-resurrect:hover { background-color: #92400e; color: #fff; }
+.btn-restart { background-color: #78350f; color: #fcd34d; font-size: 0.75rem; }
+.btn-restart:hover { background-color: #92400e; color: #fff; }
+.btn-restart:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .tag { display: inline-flex; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; background-color: #27272a; color: #a1a1aa; }
 .tag-vertical { background-color: #1e3a8a; color: #93c5fd; }

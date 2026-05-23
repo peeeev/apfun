@@ -68,8 +68,22 @@ def _stub_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class _StubScheduler:
         running = True
+        shutdown_calls = 0
+        start_calls = 0
+        # Tests can set these to raise on the corresponding method call.
+        shutdown_raises: BaseException | None = None
+        start_raises: BaseException | None = None
 
         def shutdown(self, *, wait: bool = True) -> None:
+            self.shutdown_calls += 1
+            if self.shutdown_raises is not None:
+                raise self.shutdown_raises
             self.running = False
+
+        def start(self) -> None:
+            self.start_calls += 1
+            if self.start_raises is not None:
+                raise self.start_raises
+            self.running = True
 
     monkeypatch.setattr("apfun.main.start_scheduler", lambda: _StubScheduler())

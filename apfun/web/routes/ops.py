@@ -15,6 +15,7 @@ not look at `Authorization` headers. Per `docs/orchestrator/023-ops-dashboard.md
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -31,6 +32,8 @@ from starlette.requests import Request
 from apfun.db import SessionLocal
 from apfun.models import Candidate, Decision, LLMRun, RawSignal, SchedulerRun, SignalText, Source
 from apfun.scheduler.jobs import EXPECTED_JOB_IDS
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -335,6 +338,68 @@ def ops(request: Request, session: Annotated[Session, Depends(_session)]) -> HTM
 @router.get("/ops/body", response_class=HTMLResponse)
 def ops_body(request: Request, session: Annotated[Session, Depends(_session)]) -> HTMLResponse:
     """Just the data area — polled by HTMX every 30s."""
+    return templates.TemplateResponse(request, "_ops_body.html", _safe_context(session))
+
+
+@router.post("/ops/scheduler/restart", response_class=HTMLResponse)
+def restart_scheduler(
+    request: Request, session: Annotated[Session, Depends(_session)]
+) -> HTMLResponse:
+    """Tear down + restart the APScheduler instance in place.
+
+    Operator-initiated remedy when /ops surfaces a STALE job (the
+    cluster-before-normalize symptom from earlier today, or anything that
+    wedges the scheduler without taking down uvicorn). uvicorn keeps running;
+    in-flight HTTP handlers are unaffected. Job definitions persist in the
+    SQLAlchemyJobStore and are re-read on restart.
+
+    Always writes a `scheduler_runs` row with `job_id="ops.manual_restart"`
+    as the audit trail — surfaces in /ops Recent runs immediately. Per
+    orchestrator request 025; see also CLAUDE.md → /ops mutation pattern
+    (explicit, logged, idempotent, minimal-scope).
+    """
+    scheduler = getattr(request.app.state, "scheduler", None)
+    started_at = datetime.now(UTC)
+    error_msg: str | None = None
+
+    if scheduler is None:
+        error_msg = "scheduler not initialized on app.state — restart aborted"
+        logger.error("ops.manual_restart: %s", error_msg)
+    else:
+        try:
+            # `wait=False` so we don't block on in-flight worker threads.
+            # If the scheduler is already stopped (e.g., a prior shutdown left
+            # it that way), this raises SchedulerNotRunningError — caught
+            # below and treated as "proceed to start", which is what the
+            # operator wanted anyway.
+            try:
+                scheduler.shutdown(wait=False)
+            except Exception as shutdown_exc:  # noqa: BLE001 — APScheduler can raise multiple shapes
+                logger.info(
+                    "ops.manual_restart shutdown (likely already stopped): %s",
+                    shutdown_exc,
+                )
+            scheduler.start()
+        except Exception as exc:  # noqa: BLE001 — record + surface, don't 500
+            error_msg = f"{type(exc).__name__}: {exc}"
+            logger.exception("ops.manual_restart failed")
+
+    finished_at = datetime.now(UTC)
+    session.add(
+        SchedulerRun(
+            job_id="ops.manual_restart",
+            started_at=started_at,
+            finished_at=finished_at,
+            ok=(error_msg is None),
+            error=error_msg,
+            items_processed=None,
+        )
+    )
+    session.commit()
+
+    # Return the refreshed body — same partial the 30s auto-refresh uses,
+    # so the operator immediately sees the new next_run_times and the
+    # ops.manual_restart row in Recent runs.
     return templates.TemplateResponse(request, "_ops_body.html", _safe_context(session))
 
 
