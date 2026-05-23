@@ -291,6 +291,34 @@ def test_unprocessed_signals_card(
     assert ">3<" in body
 
 
+def test_recent_runs_renders_items_processed_count_not_dict_method(
+    client_with_session: tuple[TestClient, sessionmaker],
+) -> None:
+    """Regression: a context-dict key named `items` collides with dict.items()
+    in Jinja2 attribute resolution, rendering `<built-in method items of dict>`
+    instead of the integer. Caught against the live DB after the first deploy.
+    """
+    client, factory = client_with_session
+    now = datetime.now(UTC)
+    with factory() as s:
+        s.add(
+            SchedulerRun(
+                job_id="hn.ingest_batch",
+                started_at=now,
+                finished_at=now,
+                ok=True,
+                items_processed=42,
+                error=None,
+            )
+        )
+        s.commit()
+
+    body = client.get("/ops/body").text
+    assert "<built-in method" not in body, "dict-method leaked through Jinja attribute lookup"
+    # The actual count is rendered.
+    assert ">42<" in body
+
+
 def test_old_errors_excluded_from_24h_errors_section(
     client_with_session: tuple[TestClient, sessionmaker],
 ) -> None:
