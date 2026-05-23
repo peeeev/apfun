@@ -10,32 +10,28 @@ After any change to env vars, restart the container so the new values load:
 docker compose -f /srv/claude/apfun.online/docker-compose.yml restart
 ```
 
-## Reddit OAuth (task 005b)
+## Reddit access (task 005c)
 
-`apfun/sourcing/reddit.py` authenticates via OAuth2 client-credentials. Datacenter IPs were 403'd persistently on Reddit's anonymous endpoint; OAuth is the supported workaround. One-time setup:
+`apfun/sourcing/reddit.py` reaches Reddit's public JSON endpoints through a **residential proxy** with **browser-mimicking UAs**. Two independent blocks are in play (see CLAUDE.md → Networking): datacenter IPs are network-blocked, and the web frontend filters non-browser UAs. The browser-UA half is handled internally — the only operator config is the proxy.
 
-1. Visit https://www.reddit.com/prefs/apps while logged in.
-2. Click **"Are you a developer? Create an app..."** at the bottom.
-3. Fill in:
-   - **name**: `apfun-funnel` (or anything; doesn't matter)
-   - **type**: select **`script`** (NOT "web app")
-   - **description**: optional
-   - **about url**: leave blank
-   - **redirect uri**: `http://localhost:8080` (unused by client-credentials flow but the form requires *some* value)
-4. Click "create app". The result page shows:
-   - **client_id**: the short string under the app name (looks like `aB3xK7gR9pX2`).
-   - **client_secret**: the longer string labeled "secret" (looks like `XyZ1234...`).
-5. Set on the host (e.g. in `/srv/claude/apfun.online/.env`):
+> Background: this replaces the abandoned OAuth approach (task 005b). Reddit closed self-service OAuth credential creation in November 2025 (Responsible Builder Policy), so there's no app to register anymore.
+
+One-time setup:
+
+1. Pick a residential-proxy provider. Options as of 2026-05:
+   - **Webshare** — free tier (10 proxies); $3.50/mo rotating residential. Reddit-tested. Recommended starting point.
+   - **IPRoyal** — $1.75/GB pay-as-you-go, non-expiring. Good for variable volume.
+   - Decodo / Oxylabs — enterprise-priced ($75+/mo); overkill for v1.
+2. From the provider dashboard, grab the proxy URL in `http://username:password@host:port` form. Providers that assign one IP per port (e.g. Webshare `p.webshare.io:8000`, `:8001`) — pick one port; the env var takes a single URL.
+3. Set on the host (e.g. in `/srv/claude/apfun.online/.env`):
    ```
-   APFUN_REDDIT_CLIENT_ID=<client_id from step 4>
-   APFUN_REDDIT_CLIENT_SECRET=<client_secret from step 4>
-   APFUN_REDDIT_USERNAME=<your Reddit handle, no leading u/>
+   APFUN_REDDIT_HTTP_PROXY=http://username:password@host:port
    ```
-6. Restart the container.
+4. Restart the container.
 
-Verification: run `docker exec -it apfun-funnel uv run python -c "from apfun.sourcing.reddit import _get_auth; import httpx; print(_get_auth().get_token(httpx.Client()))"` — should print a token string. If you get the `Reddit OAuth credentials are missing` error, env vars didn't load (restart wasn't picked up, or `.env` path wrong).
+Verification: run `docker exec -it apfun-funnel uv run python -c "from apfun.sourcing.reddit import _build_client; c=_build_client(); print(c.get('https://www.reddit.com/r/SaaS/new.json', headers=__import__('apfun.sourcing.reddit', fromlist=['_build_headers'])._build_headers()).status_code)"` — should print `200`. A `403` means the proxy IP is itself blocked (try another provider/port); the `APFUN_REDDIT_HTTP_PROXY is required` error means the env var didn't load.
 
-Whether OAuth actually fixes the datacenter-IP blocking is empirical — runbook 002 (`docs/operator/runbooks/002-reddit-oauth-first-pass.md`) is the post-merge test that confirms it. If OAuth alone is insufficient, the next step is residential proxies (separate future PR), not more header tweaks.
+Whether the proxy + browser-UA actually gets through is empirical — runbook 003 (`docs/operator/runbooks/003-reddit-proxy-first-pass.md`) is the post-merge test that confirms it. If it's blocked despite the proxy, the next escalation is a JS-capable client (Playwright), task 005d.
 
 ## Anthropic API
 

@@ -1,13 +1,9 @@
-"""Unit tests for `apfun.sourcing.reddit.ingest`.
+"""Unit tests for `apfun.sourcing.reddit.ingest` (task 005c proxy + browser-UA).
 
 Mocks `httpx.Client` against the synthetic fixture in `tests/fixtures/reddit/`.
-Verifies: dedup on re-ingest, deletion tagging, UA-header + OAuth bearer
-presence, content-hash stability, rate-limit `acquire()` invocation, listing
-URL uses the oauth.reddit.com base.
-
-OAuth (task 005b) note: every test uses the `stub_reddit_auth` fixture so
-the production token endpoint is never hit. Tests for the auth lifecycle
-itself live in `test_reddit_oauth.py`.
+Verifies: dedup on re-ingest, deletion tagging, content-hash stability,
+rate-limit `acquire()` invocation, browser-UA rotation, full browser header
+set on outbound requests, and the proxy-required loud-failure.
 """
 
 from __future__ import annotations
@@ -46,22 +42,6 @@ def _make_mock_client(status: int = 200, body: dict[str, Any] | None = None) -> 
     client = MagicMock(spec=httpx.Client)
     client.get.return_value = response
     return client
-
-
-@pytest.fixture(autouse=True)
-def stub_reddit_auth(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    """Replace the OAuth singleton with a stub that returns a fixed token.
-
-    Reset the module-level singleton so prior tests don't leak. The stub's
-    `get_token` always returns the same string, which is what the tests
-    assert against in the Bearer header check.
-    """
-    monkeypatch.setattr(reddit_module, "_auth", None)
-    stub = MagicMock()
-    stub.get_token.return_value = "test-bearer"
-    stub.invalidate = MagicMock()
-    monkeypatch.setattr(reddit_module, "_get_auth", lambda: stub)
-    return stub
 
 
 @pytest.fixture
@@ -136,29 +116,65 @@ def test_deletion_tagging(session: Session, reddit_source: Source) -> None:
     assert "deletion_marker" not in alive.payload_json
 
 
-def test_user_agent_header_format(session: Session, reddit_source: Source) -> None:
+def test_browser_headers_on_outbound_request(session: Session, reddit_source: Source) -> None:
+    """Every Reddit request carries the full browser header set + a UA from the pool."""
     client = _make_mock_client()
     ingest(session, reddit_source, client=client)
 
     assert client.get.call_count == 1
-    args, kwargs = client.get.call_args
+    _, kwargs = client.get.call_args
     headers = kwargs["headers"]
-    ua = headers["User-Agent"]
-    assert ua.startswith("apfun-funnel:v0.1 (by /u/")
-    assert ua.endswith(")")
-    assert "apfun_test_runner" in ua, "should pick up reddit_username from settings"
-    # OAuth: every listing fetch carries a Bearer header from the auth stub.
-    assert headers["Authorization"] == "Bearer test-bearer"
+    # All BROWSER_HEADERS keys present...
+    for key in reddit_module.BROWSER_HEADERS:
+        assert headers[key] == reddit_module.BROWSER_HEADERS[key]
+    # ...plus a UA drawn from the pool (a real Chrome string, NOT PRAW-style).
+    assert headers["User-Agent"] in reddit_module.USER_AGENT_POOL
+    assert "apfun-funnel" not in headers["User-Agent"]
+    assert "by /u/" not in headers["User-Agent"]
 
 
-def test_listing_uses_oauth_base_url(session: Session, reddit_source: Source) -> None:
-    """Listing fetches hit `oauth.reddit.com`, not `www.reddit.com`. Task 005b."""
-    client = _make_mock_client()
-    ingest(session, reddit_source, client=client)
-    args, _ = client.get.call_args
-    url = args[0]
-    assert url.startswith("https://oauth.reddit.com/r/SaaS/")
-    assert url.endswith("/new.json")
+def test_user_agent_rotates_across_calls() -> None:
+    """Over many calls, `_build_headers()` should surface all pool UAs.
+
+    Probabilistic: with 3 UAs over 30 draws, the chance of missing any one is
+    (2/3)**30 ≈ 5e-6 — tight enough that a flake is effectively impossible.
+    """
+    seen = {reddit_module._build_headers()["User-Agent"] for _ in range(30)}
+    assert seen == set(reddit_module.USER_AGENT_POOL)
+
+
+def test_build_headers_has_full_set() -> None:
+    headers = reddit_module._build_headers()
+    assert set(headers) == set(reddit_module.BROWSER_HEADERS) | {"User-Agent"}
+
+
+def test_build_client_fails_loud_without_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing proxy URL raises a CLAUDE.md-pointing error at the call site."""
+    monkeypatch.setattr(reddit_module.settings, "reddit_http_proxy", "")
+    with pytest.raises(RuntimeError, match="APFUN_REDDIT_HTTP_PROXY"):
+        reddit_module._build_client()
+
+
+def test_build_client_uses_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A configured proxy URL produces a client (smoke — we don't dial out)."""
+    monkeypatch.setattr(
+        reddit_module.settings, "reddit_http_proxy", "http://user:pass@p.example:8000"
+    )
+    client = reddit_module._build_client()
+    try:
+        assert isinstance(client, httpx.Client)
+    finally:
+        client.close()
+
+
+def test_ingest_builds_proxy_client_when_none(
+    session: Session, reddit_source: Source, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When no client is passed, ingest() builds one via _build_client() — which
+    means a missing proxy fails loud rather than silently hitting Reddit direct."""
+    monkeypatch.setattr(reddit_module.settings, "reddit_http_proxy", "")
+    with pytest.raises(RuntimeError, match="APFUN_REDDIT_HTTP_PROXY"):
+        ingest(session, reddit_source)  # no client → _build_client() → raises
 
 
 def test_rate_limiter_acquired_per_call(

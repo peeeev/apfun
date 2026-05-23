@@ -1,5 +1,7 @@
 # Runbook 002 — Reddit OAuth first-pass
 
+> **ABANDONED — do not run.** Reddit closed self-service OAuth credential creation in November 2025 (Responsible Builder Policy), so there's no app to register and no token to fetch. The OAuth code this runbook tested was reverted in task 005c. The current Reddit access path (residential proxy + browser-mimicking UA) is validated by **runbook 003** instead. Kept for the paper trail. Per orchestrator request 021.
+
 **Goal:** confirm whether OAuth solves the datacenter-IP blocking that runbook 001 surfaced on Reddit's anonymous endpoint. Empirical question per orchestrator request 020 §Specific questions or risks Q1.
 
 **Expected outcome:** one of:

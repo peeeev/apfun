@@ -16,12 +16,12 @@ Bind any HTTP/ASGI server to `0.0.0.0:4000`. Never `127.0.0.1`. Apache on the ho
 
 **Canonical container CMD:** `uv run uvicorn apfun.main:app --host 0.0.0.0 --port 4000`. This is what the host's `docker-compose.yml` should put in its `command:` line. The `python -m apfun.main` form works too (and boots the same app) but the uvicorn CLI is canonical because it exposes `--workers`, `--log-level`, etc. without code changes.
 
-**Reddit OAuth (task 005b).** `apfun/sourcing/reddit.py` authenticates via OAuth2 client-credentials against `oauth.reddit.com` — datacenter IPs were 403'd persistently on the anonymous endpoint. Three env vars together:
+**Reddit access (task 005c).** Reddit ingestion has *two independent gating layers* and requires both to be addressed:
 
-- `APFUN_REDDIT_USERNAME` — required, fail-loud at `Settings()` construction. Reddit's UA still demands `by /u/<handle>` even on OAuth requests. Silent-degradation behavior on missing UA (per Auth secret discipline below).
-- `APFUN_REDDIT_CLIENT_ID` / `APFUN_REDDIT_CLIENT_SECRET` — required for ingest, loud-failure at first call site. Reddit's OAuth endpoint returns a clear 401 on missing/bad creds, so call-site failure is the right shape.
+1. **Network.** Datacenter IPs are blocked at the network layer — requires a residential proxy via `APFUN_REDDIT_HTTP_PROXY` (URL format `http://user:pass@host:port`; the env var accepts a single proxy URL — providers that assign one IP per port mean the operator picks one port). Loud-failure at the `_build_client()` call site if the var is empty and Reddit sources run.
+2. **Application.** The web frontend (`www.reddit.com`) filters non-browser UAs since June 2025 — including the PRAW-style self-identifying UA that was appropriate for *authenticated* API access. The anonymous public-JSON path is treated as browser traffic, so we send a rotating pool of recent Chrome UAs (`USER_AGENT_POOL`) plus a full browser header set (`BROWSER_HEADERS`), not a self-identifying UA.
 
-Operator setup procedure lives in `docs/operator/SETUP.md` → Reddit OAuth (six-step app registration). If OAuth alone proves insufficient against datacenter blocking, residential-proxy support is the next escalation (`APFUN_REDDIT_PROXY`, future PR) — not more header tweaks.
+Both are implemented in `apfun/sourcing/reddit.py`. Operator setup (pick a residential-proxy provider, set the env var, restart) lives in `docs/operator/SETUP.md` → Reddit access. This supersedes task 005b (OAuth), abandoned when Reddit closed self-service OAuth credential creation in November 2025. If proxy + browser-UA still gets blocked, the next escalation is a JS-capable client (Playwright) — task 005d, not pre-built.
 
 ## Model selection policy
 
@@ -227,3 +227,4 @@ Status values: `open` (request submitted, no feedback yet), `answered` (feedback
   3. **Upstream-API-change bugs** where the SDK's deprecations aren't covered by mocked responses (e.g., Opus 4.7's `thinking.type="enabled"` → `"adaptive"` migration — PR #11).
 
   For Stage 1+ work, plan a runbook-shaped empirical session shortly after writing tests. Cost is cheap (30-60 minutes); the alternative is silent production data loss or scheduler crashes. See also "Every pipeline stage requires a runbook before scheduler integration" in Project conventions. Per orchestrator feedback 018 Q5.
+- 2026-05-22: **External-API policy changes can invalidate engineering effort mid-project, and one symptom can mask multiple causes.** Reddit's November 2025 Responsible Builder Policy made the OAuth migration from task 005b obsolete before it ever ran (self-service OAuth credential creation was closed). Investigating the workaround surfaced a *second* independent block: Reddit's web frontend started filtering by User-Agent in June 2025, meaning the PRAW-style UA convention (correct for authenticated API access) is wrong for the anonymous JSON path. The 403s seen from runbook 001 onward had two causes, not one. Single-cause diagnostic mental models miss layered defenses; verify each layer independently when a workaround unblocks the first symptom. Discipline: web-search the current state of any third-party API's access policy *and* anti-bot posture before drafting a migration spec, regardless of how confident the prior model is. Per orchestrator request 021. (Task 005b → 005c reversal was the tuition.)

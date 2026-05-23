@@ -11,14 +11,12 @@ class Settings(BaseSettings):
     port: int = 4000
     db_url: str = "sqlite:///data/apfun.db"
     anthropic_api_key: str = ""
-    reddit_username: str = ""
-    # OAuth client-credentials (task 005b). Loud-failure: empty default,
-    # `apfun.sourcing.reddit` raises with a CLAUDE.md-pointing message at the
-    # first call site when missing. Per the auth-secret discipline (CLAUDE.md
-    # → Auth secret discipline) — Reddit's OAuth endpoint returns a clear 401
-    # on missing/bad creds, so call-site failure is the right shape.
-    reddit_client_id: str = ""
-    reddit_client_secret: str = ""
+    # Residential proxy for Reddit ingestion (task 005c). Reddit blocks
+    # datacenter IPs at the network layer; this routes Reddit traffic through a
+    # residential proxy. Loud-failure: empty default here, `apfun.sourcing.
+    # reddit._build_client()` raises with a CLAUDE.md-pointing message at the
+    # call site when missing (per CLAUDE.md → Auth secret discipline).
+    reddit_http_proxy: str = ""
     producthunt_token: str = ""
 
     @field_validator("host")
@@ -31,21 +29,18 @@ class Settings(BaseSettings):
             )
         return v
 
-    @field_validator("reddit_username", mode="after")
+    @field_validator("reddit_http_proxy", mode="after")
     @classmethod
-    def _validate_reddit_username(cls, v: str) -> str:
-        # Fail-loud at Settings() construction — Reddit silently blocks
-        # non-conformant User-Agents, so phantom-empty fetches are worse than
-        # a crash. Per docs/tasks/005-reddit-ingester.md → Config and
-        # orchestrator feedback 011 Q1.
-        if not v or not v.strip():
+    def _validate_reddit_proxy(cls, v: str) -> str:
+        # Empty is allowed — the call site (`_build_client`) decides whether a
+        # missing proxy is fatal. If non-empty, it must look like a proxy URL
+        # so a typo fails at construction rather than as an opaque httpx error.
+        if v and not v.startswith(("http://", "https://")):
             raise ValueError(
-                "APFUN_REDDIT_USERNAME is required. Reddit silently blocks "
-                "non-conformant User-Agents — an empty username produces "
-                "phantom-empty results, not errors. Set the env var to your "
-                "Reddit handle. See CLAUDE.md → Networking for context."
+                "APFUN_REDDIT_HTTP_PROXY must be a URL starting with http:// or https://. "
+                "Format: http://username:password@host:port. See CLAUDE.md → Networking."
             )
-        return v.strip()
+        return v
 
 
 settings = Settings()

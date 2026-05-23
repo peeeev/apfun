@@ -46,7 +46,8 @@ Sequenced, PR-sized, each ~half-day and independently testable. Numbers are the 
 ## Cross-cutting
 
 - 023 — GitHub Actions CI (sequenced between Phase E and Phase F per orchestrator feedback 009 — PR-review teeth land before the final UI/digest tasks; file-number is post-022 but execution-order is pre-020)
-- 005b — Reddit OAuth migration (post-task-005 follow-up after datacenter-IP blocking persisted on the anonymous endpoint; OAuth2 client-credentials via `oauth.reddit.com`). Per orchestrator request 020.
+- 005b — Reddit OAuth migration (ABANDONED — Reddit closed self-service OAuth in Nov 2025 under the Responsible Builder Policy; superseded by 005c). Per orchestrator request 020.
+- 005c — Reddit residential-proxy + browser-UA migration (post-005b reversal after Reddit API and frontend policy changes; anonymous public-JSON path through `APFUN_REDDIT_HTTP_PROXY` + rotating Chrome UAs). Per orchestrator request 021.
 
 ## Open questions (from brief §14, parked)
 
