@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import sessionmaker
 
 from apfun.models import (
@@ -388,3 +388,131 @@ def test_old_errors_excluded_from_24h_errors_section(
     assert "OldError: ancient" in body
     # ...but the 24h Recent-errors section is empty-stated for both subsections.
     assert body.count("No errors in last 24h ✓") == 2
+
+
+# ─────────────── /ops/scheduler/restart (task 023-fix-1, request 025) ───────
+
+
+def test_restart_calls_shutdown_then_start_and_logs_row(
+    client_with_session: tuple[TestClient, sessionmaker],
+) -> None:
+    """Happy path: POST /ops/scheduler/restart calls scheduler.shutdown(wait=False)
+    then scheduler.start(), and writes a SchedulerRun audit row.
+    """
+    client, factory = client_with_session
+    from apfun.main import app
+
+    stub = app.state.scheduler
+    stub.shutdown_calls = 0
+    stub.start_calls = 0
+
+    r = client.post("/ops/scheduler/restart")
+    assert r.status_code == 200
+
+    assert stub.shutdown_calls == 1, "shutdown should fire exactly once"
+    assert stub.start_calls == 1, "start should fire exactly once"
+
+    with factory() as s:
+        rows = (
+            s.execute(select(SchedulerRun).where(SchedulerRun.job_id == "ops.manual_restart"))
+            .scalars()
+            .all()
+        )
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.ok is True
+    assert row.error is None
+    assert row.items_processed is None
+
+
+def test_restart_response_is_body_partial_not_full_page(
+    client_with_session: tuple[TestClient, sessionmaker],
+) -> None:
+    """The endpoint returns _ops_body.html (chrome-less fragment) so HTMX can
+    swap it into #ops-body. The freshly-written ops.manual_restart row appears
+    in Recent runs immediately."""
+    client, _ = client_with_session
+    r = client.post("/ops/scheduler/restart")
+    assert r.status_code == 200
+    # Fragment, no chrome.
+    assert "<html" not in r.text
+    assert "Scheduler" in r.text
+    # The just-written audit row surfaces in Recent runs.
+    assert "ops.manual_restart" in r.text
+
+
+def test_restart_handles_shutdown_already_stopped_gracefully(
+    client_with_session: tuple[TestClient, sessionmaker],
+) -> None:
+    """shutdown() raising (e.g., SchedulerNotRunningError because the scheduler
+    is already stopped) shouldn't abort the restart — proceed to start(), which
+    is what the operator wanted anyway."""
+    client, factory = client_with_session
+    from apfun.main import app
+
+    stub = app.state.scheduler
+    stub.shutdown_calls = 0
+    stub.start_calls = 0
+    stub.shutdown_raises = RuntimeError("SchedulerNotRunningError: not running")
+
+    r = client.post("/ops/scheduler/restart")
+    assert r.status_code == 200
+
+    # shutdown attempted (and raised), but start() still fired.
+    assert stub.shutdown_calls == 1
+    assert stub.start_calls == 1
+
+    with factory() as s:
+        row = s.execute(
+            select(SchedulerRun).where(SchedulerRun.job_id == "ops.manual_restart")
+        ).scalar_one()
+    # The net result is "scheduler is now running" — ok=True.
+    assert row.ok is True
+    assert row.error is None
+
+    # Cleanup: stop raising for any subsequent tests.
+    stub.shutdown_raises = None
+
+
+def test_restart_records_failure_when_start_raises(
+    client_with_session: tuple[TestClient, sessionmaker],
+) -> None:
+    """If scheduler.start() itself raises, the row records ok=False with the
+    error message but the response is still 200 (the user sees the dashboard
+    with the failure visible in Recent runs — not a 500)."""
+    client, factory = client_with_session
+    from apfun.main import app
+
+    stub = app.state.scheduler
+    stub.start_raises = RuntimeError("KaboomError: jobstore unreachable")
+
+    try:
+        r = client.post("/ops/scheduler/restart")
+        assert r.status_code == 200
+
+        with factory() as s:
+            row = s.execute(
+                select(SchedulerRun).where(SchedulerRun.job_id == "ops.manual_restart")
+            ).scalar_one()
+        assert row.ok is False
+        assert row.error is not None
+        assert "KaboomError" in row.error
+        # The failure surfaces in the rendered body (Recent errors / Recent runs).
+        assert "KaboomError" in r.text
+    finally:
+        stub.start_raises = None
+
+
+def test_restart_button_present_in_scheduler_section(
+    client_with_session: tuple[TestClient, sessionmaker],
+) -> None:
+    """The button is wired with hx-post, hx-confirm, hx-disabled-elt, and
+    targets #ops-body with innerHTML swap (innerHTML preserves the wrapper's
+    30s auto-refresh trigger — outerHTML would strip it)."""
+    client, _ = client_with_session
+    body = client.get("/ops/body").text
+    assert 'hx-post="/ops/scheduler/restart"' in body
+    assert "hx-confirm=" in body
+    assert 'hx-disabled-elt="this"' in body
+    assert 'hx-target="#ops-body"' in body
+    assert 'hx-swap="innerHTML"' in body
