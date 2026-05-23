@@ -130,3 +130,20 @@ button:hover, a:hover { text-decoration: none; }
 .tag-vertical { background-color: #1e3a8a; color: #93c5fd; }
 .tag-signals { background-color: #18181b; color: #d4d4d8; }
 .tag-alert { background-color: #78350f; color: #fcd34d; }
+
+/* /ops dashboard (task 024) — desktop-oriented, dense tables + KPI cards */
+.ops-cards { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.ops-card {
+  display: flex; flex-direction: column; gap: 0.25rem;
+  flex: 1 1 8rem; min-width: 8rem;
+  border: 1px solid #27272a; border-radius: 0.5rem; padding: 0.75rem;
+}
+.ops-card-label { font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.04em; color: #71717a; }
+.ops-card-value { font-size: 1.5rem; font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #f4f4f5; }
+.ops-h2 { font-size: 1rem; font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #f4f4f5; margin-bottom: 0.5rem; }
+.ops-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.ops-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+.ops-table th { text-align: left; color: #71717a; font-weight: 500; padding: 0.25rem 0.5rem; border-bottom: 1px solid #27272a; }
+.ops-table td { padding: 0.25rem 0.5rem; border-bottom: 1px solid #18181b; color: #d4d4d8; vertical-align: top; }
+.ops-row-error td { background-color: rgba(127, 29, 29, 0.25); color: #fca5a5; }
+.ops-err { max-width: 28rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

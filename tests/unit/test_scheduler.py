@@ -133,6 +133,10 @@ def test_register_all_adds_every_prescribed_job(tmp_path: Path) -> None:
     # Stage 2 (task 011) is deliberately NOT registered yet (per feedback 019 Q1).
     assert "stage2.demand_check" not in by_id
 
+    # EXPECTED_JOB_IDS (consumed by the /ops dashboard to flag disabled jobs)
+    # must stay in lockstep with what register_all actually schedules.
+    assert set(by_id) == set(jobs.EXPECTED_JOB_IDS)
+
     # Cadence-spec spot checks. Reddit is every 6h.
     reddit_trigger = by_id["reddit.ingest_batch"].trigger
     assert isinstance(reddit_trigger, IntervalTrigger)
