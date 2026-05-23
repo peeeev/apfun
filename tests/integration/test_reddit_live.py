@@ -1,11 +1,11 @@
-"""Integration test for the Reddit ingester — hits a real subreddit via OAuth.
+"""Integration test for the Reddit ingester — hits a real subreddit via proxy.
 
 Marked @pytest.mark.integration so `make test` skips by default; run via
-`make test-all`. Requires internet access plus real OAuth credentials:
-`APFUN_REDDIT_USERNAME`, `APFUN_REDDIT_CLIENT_ID`, `APFUN_REDDIT_CLIENT_SECRET`
-(register a "script" app at https://www.reddit.com/prefs/apps — task 005b
-migrated this ingester to OAuth after datacenter-IP blocking persisted on the
-anonymous path).
+`make test-all`. Requires internet access plus a configured residential proxy
+(`APFUN_REDDIT_HTTP_PROXY`). Task 005c migrated this ingester to a residential
+proxy + browser-mimicking UA pool after Reddit's datacenter-IP block and
+June-2025 web-frontend UA filtering made both the anonymous and OAuth paths
+unviable from this server.
 
 Per orchestrator feedback 011 Q3: this test does NOT write fixtures. Fixture
 capture lives in `scripts/capture_reddit_fixture.py` as a separate, intentional
@@ -28,26 +28,18 @@ from apfun.sourcing.reddit import ingest
 
 def _internet_available() -> bool:
     try:
-        socket.gethostbyname("oauth.reddit.com")
+        socket.gethostbyname("www.reddit.com")
         return True
     except OSError:
         return False
-
-
-def _real_oauth_creds_available() -> bool:
-    """Sentinels from conftest don't count — the real token endpoint rejects them."""
-    return settings.reddit_client_id not in (
-        "",
-        "test_client_id",
-    ) and settings.reddit_client_secret not in ("", "test_client_secret")
 
 
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(not _internet_available(), reason="no internet"),
     pytest.mark.skipif(
-        not _real_oauth_creds_available(),
-        reason="APFUN_REDDIT_CLIENT_ID/SECRET not set (conftest sentinels won't authenticate)",
+        not settings.reddit_http_proxy,
+        reason="APFUN_REDDIT_HTTP_PROXY not set (Reddit blocks datacenter IPs)",
     ),
 ]
 
@@ -61,6 +53,7 @@ def test_live_reddit_ingest_inserts_rows(session: Session) -> None:
     session.add(src)
     session.flush()
 
+    # No client passed → ingest() builds the proxy-routed client itself.
     result = ingest(session, src)
     session.commit()
 
