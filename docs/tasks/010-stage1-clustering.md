@@ -114,3 +114,16 @@ After the first scheduler-driven Stage 1 run accumulates N=100+ rows in `llm_run
 1. **Wire `cache_blocks` in `judge_json("cluster", ...)`.** Currently `cache_ttl="1h"` is set but `cache_blocks` isn't passed → 0% cache hit ratio observed in runbook 001 (per feedback 018 Q6). Pass the static system preamble + JSON-schema explanation as cache blocks once prompts stabilize. Worth measurable cost savings on multi-bucket batches.
 2. **Vertical label drift.** Haiku emits `source.vertical` as a freeform string. Runbook 001 produced both `"recruiting"` and `"hiring"` for the same vertical at N=11. If the unique-vertical count exceeds ~20 at N=100+, constrain to a fixed taxonomy via `VERTICALS = Literal[...]` allowlist in `SignalCoreComplaint` with "other" as fallback. Per feedback 018 observation.
 3. **Singleton-bucket re-validation.** Runbook 001 produced 1:1 signal-to-candidate (every signal → its own bucket → its own candidate). Expected at low N with HN's diverse-content shape. If this persists at N=100+ with Reddit/review-site data flowing, the keyword-set instruction in `cluster.j2` is too narrow and needs to push toward abstract domain-level keywords. Per feedback 018 Q7.
+
+### Null-complaint handling (task 010-fix-1, per orchestrator request 024)
+
+Real-world signal text isn't uniformly complaint-shaped — deleted Reddit posts whose titles slipped past structural `is_low_signal` filtering, Show-HN announcements, off-topic threads. `SignalCoreComplaint.core_complaint`/`vertical`/`keywords` are all `Optional`; the `dedup_signal.j2` prompt explicitly permits returning `null` when no complaint is discernible.
+
+When Haiku returns null `core_complaint`, `_haiku_prepass`:
+
+1. Marks the signal `signal_text.is_low_signal=True` in an independent transaction (durable across any later cluster-pipeline rollback).
+2. Drops the signal from the enriched output for this run.
+
+Subsequent runs filter it out via `_load_unclustered`'s existing `is_low_signal=False` gate — no re-Haiku, no wasted cost. This broadens `is_low_signal`'s meaning to cover both structural noise (set during normalization) and LLM-judgment noise (set here). See the `signal_text` model docstring for the dual-meaning note, and the 2026-05-23 Lesson Learned in CLAUDE.md.
+
+If the operator notices the null rate is surprisingly high (>50%) after a run, that's a signal that *either* the incoming content is lower-quality than expected *or* Haiku's null-threshold is too aggressive — escalate to the orchestrator with cost numbers + skip counts before tightening the prompt.
