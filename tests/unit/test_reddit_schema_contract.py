@@ -4,6 +4,12 @@ Assert that every field the ingester depends on is present in a captured
 fixture. If this test fails after a fixture refresh, Reddit changed their
 response shape — investigate before adjusting the parser. See CLAUDE.md →
 Project conventions → "Contract tests for external schemas."
+
+This test runs against the **real** capture (`listing_saas_real.json`) so it
+detects upstream shape drift. The value-asserting ingester tests use the
+**synthetic** `listing_saas.json` for controlled IDs/markers — two fixtures,
+two jobs (per CLAUDE.md → Lessons learned, "Fixtures serve two different jobs"
+/ orchestrator feedback 022 Q1).
 """
 
 from __future__ import annotations
@@ -13,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-_FIXTURE_PATH = Path(__file__).parents[1] / "fixtures" / "reddit" / "listing_saas.json"
+_FIXTURE_PATH = Path(__file__).parents[1] / "fixtures" / "reddit" / "listing_saas_real.json"
 
 
 def _load() -> dict[str, object]:
