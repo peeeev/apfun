@@ -173,17 +173,29 @@ def register_all(scheduler: BackgroundScheduler) -> None:
     019 Q3. The Stage 2 slot is deliberately empty — wired in when task 011
     ships and its own runbook has been run.
     """
+    # All interval jobs carry an explicit `start_date` so their cadence anchors
+    # to a fixed UTC grid, NOT to scheduler-start time. A bare IntervalTrigger
+    # anchors its first fire to "now", so two bare-or-mixed triggers drift
+    # relative to each other depending on when the process booted — which broke
+    # the intended "HN 1h after Reddit" and "cluster 10min after normalize"
+    # offsets (cluster was firing *before* normalize). Fixed anchors make the
+    # relative ordering deterministic across restarts. (Residual: booting inside
+    # the 10-min normalize→cluster gap can delay one cluster cycle; coalesce=True
+    # + the next window self-correct it.)
+
     # Ingest jobs — cadences chosen to "wake when there's plausibly new content"
     # rather than to hammer upstream. Empty results just no-op.
     scheduler.add_job(
         reddit_ingest_job,
-        trigger=IntervalTrigger(hours=6),
+        # 6h grid anchored to 00:00 UTC → 00/06/12/18.
+        trigger=IntervalTrigger(hours=6, start_date="2026-01-01 00:00:00+00:00"),
         id="reddit.ingest_batch",
         replace_existing=True,
     )
     scheduler.add_job(
         hn_ingest_job,
-        # 1h offset from Reddit so the two heaviest ingesters don't fire together.
+        # 1h offset from Reddit so the two heaviest ingesters don't fire together
+        # → 01/07/13/19 UTC.
         trigger=IntervalTrigger(hours=6, start_date="2026-01-01 01:00:00+00:00"),
         id="hn.ingest_batch",
         replace_existing=True,
@@ -210,14 +222,15 @@ def register_all(scheduler: BackgroundScheduler) -> None:
     # Pipeline stages — Stage 0 normalize runs ahead of Stage 1 each tick.
     scheduler.add_job(
         normalize_job,
-        trigger=IntervalTrigger(hours=2),
+        # 2h grid anchored to :00 → even hours UTC (00:00, 02:00, ...).
+        trigger=IntervalTrigger(hours=2, start_date="2026-01-01 00:00:00+00:00"),
         id="pipeline.normalize",
         replace_existing=True,
     )
     scheduler.add_job(
         cluster_job,
-        # 10-minute offset from normalize so signal_text rows are ready
-        # by the time Stage 1 looks for them.
+        # 10-minute offset from normalize so signal_text rows are ready by the
+        # time Stage 1 looks for them → :10 past each even hour UTC.
         trigger=IntervalTrigger(hours=2, start_date="2026-01-01 00:10:00+00:00"),
         id="pipeline.cluster",
         replace_existing=True,
