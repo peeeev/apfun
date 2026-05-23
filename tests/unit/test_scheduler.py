@@ -144,6 +144,67 @@ def test_register_all_adds_every_prescribed_job(tmp_path: Path) -> None:
     assert cluster_trigger.interval.total_seconds() == 2 * 3600
 
 
+def test_interval_jobs_are_grid_anchored_not_float() -> None:
+    """Every interval job must carry an explicit start_date so its cadence
+    anchors to a fixed UTC grid, not to scheduler-start time. A bare
+    IntervalTrigger (start_date=None) drifts relative to the others depending
+    on when the process booted — which is the ordering bug this guards against.
+    """
+    from apscheduler.triggers.interval import IntervalTrigger as IT
+
+    for job_id in (
+        "reddit.ingest_batch",
+        "hn.ingest_batch",
+        "pipeline.normalize",
+        "pipeline.cluster",
+    ):
+        sched = build_scheduler(db_url="sqlite://", pool_size=1)
+        jobs.register_all(sched)
+        trigger = {j.id: j for j in sched.get_jobs()}[job_id].trigger
+        assert isinstance(trigger, IT)
+        assert trigger.start_date is not None, f"{job_id} interval trigger must be grid-anchored"
+
+
+def test_normalize_fires_before_cluster_each_window() -> None:
+    """Within a 2h window, normalize (:00) must fire ahead of cluster (:10) so
+    signal_text rows are fresh when Stage 1 reads them. Regression guard for
+    the inverted-ordering bug where cluster was anchored but normalize floated.
+    """
+    from datetime import UTC, datetime
+
+    sched = build_scheduler(db_url="sqlite://", pool_size=1)
+    jobs.register_all(sched)
+    by_id = {j.id: j for j in sched.get_jobs()}
+    norm = by_id["pipeline.normalize"].trigger
+    clus = by_id["pipeline.cluster"].trigger
+
+    # Reference just before an even-hour boundary → both fire in the same window.
+    ref = datetime(2026, 6, 1, 1, 59, 0, tzinfo=UTC)
+    norm_next = norm.get_next_fire_time(None, ref)
+    clus_next = clus.get_next_fire_time(None, ref)
+    assert norm_next == datetime(2026, 6, 1, 2, 0, 0, tzinfo=UTC)
+    assert clus_next == datetime(2026, 6, 1, 2, 10, 0, tzinfo=UTC)
+    assert norm_next < clus_next
+
+
+def test_hn_ingest_offset_one_hour_after_reddit() -> None:
+    """HN is anchored 1h after Reddit so the two heaviest ingesters don't
+    collide. Regression guard: Reddit used to float (bare trigger)."""
+    from datetime import UTC, datetime, timedelta
+
+    sched = build_scheduler(db_url="sqlite://", pool_size=1)
+    jobs.register_all(sched)
+    by_id = {j.id: j for j in sched.get_jobs()}
+    # Reference just before the 06:00 reddit grid point → both fire in the same
+    # 6h window, hn exactly 1h after reddit.
+    ref = datetime(2026, 6, 1, 5, 59, 0, tzinfo=UTC)
+    reddit_next = by_id["reddit.ingest_batch"].trigger.get_next_fire_time(None, ref)
+    hn_next = by_id["hn.ingest_batch"].trigger.get_next_fire_time(None, ref)
+    assert reddit_next == datetime(2026, 6, 1, 6, 0, 0, tzinfo=UTC)
+    assert hn_next == datetime(2026, 6, 1, 7, 0, 0, tzinfo=UTC)
+    assert hn_next - reddit_next == timedelta(hours=1)
+
+
 def test_healthz_reports_scheduler_running(engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
     """The autouse `_stub_scheduler` fixture (conftest) sets running=True; the
     /healthz endpoint surfaces that on app.state.scheduler."""
