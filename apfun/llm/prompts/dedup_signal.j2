@@ -6,13 +6,20 @@ the schema. No prose, no markdown code fences, no explanation.
 
 Schema:
 {
-  "core_complaint": "single-sentence summary of the underlying complaint, normalized to present tense and removing rhetorical questions",
-  "vertical": "short slug suggesting the vertical (e.g. 'dev-tools', 'billing', 'crm', 'analytics'). Use a lowercase hyphenated form. Pick ONE.",
+  "core_complaint": "single-sentence summary of the underlying complaint, normalized to present tense and removing rhetorical questions. May be null — see below.",
+  "vertical": "short slug suggesting the vertical (e.g. 'dev-tools', 'billing', 'crm', 'analytics'). Use a lowercase hyphenated form. Pick ONE. May be null when core_complaint is null.",
   "keywords": ["3-5", "lowercase", "deduplicated", "keywords", "covering the core complaint"]
 }
 
 Rules:
 - `core_complaint` MUST reflect the actual signal text. Don't invent.
+- **Return `null` for `core_complaint` when the signal contains no discernible
+  complaint** — e.g., the body is `[deleted]`/`[removed]`, a Show-HN-style
+  announcement, a success story, off-topic chatter, or otherwise not framed
+  around a problem. Inventing a complaint pollutes downstream clusters; null
+  is honest and is what the pipeline expects in that case.
+- When `core_complaint` is null, `vertical` and `keywords` should also be
+  null (no complaint → no domain → no keywords).
 - `vertical` is your best guess; "unknown" is acceptable when nothing in the
   signal points at a domain.
 - `keywords` are concrete, not abstract: "stripe", "proration", "onboarding"

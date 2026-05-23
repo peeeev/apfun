@@ -1,0 +1,10 @@
+{
+  "_fixture_meta": {
+    "captured": "2026-05-23",
+    "source": "hand-crafted synthetic — represents a Haiku dedup_signal response for a non-clusterable signal (e.g., [deleted] Reddit body, Show-HN announcement, off-topic content)",
+    "purpose": "schema-validation test that SignalCoreComplaint accepts null core_complaint/vertical/keywords. Per orchestrator request 024."
+  },
+  "core_complaint": null,
+  "vertical": null,
+  "keywords": null
+}

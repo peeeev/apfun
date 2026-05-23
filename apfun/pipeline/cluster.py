@@ -32,10 +32,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from apfun.db import try_insert
+from apfun.db import SessionLocal, try_insert
 from apfun.llm import prompts
 from apfun.llm.client import LLMClient
 from apfun.models import (
@@ -69,11 +69,21 @@ _MAX_SIGNALS_PER_RUN: int = 500
 
 
 class SignalCoreComplaint(BaseModel):
-    """Output schema for the Haiku pre-pass on one signal."""
+    """Output schema for the Haiku pre-pass on one signal.
 
-    core_complaint: str
-    vertical: str
-    keywords: list[str] = Field(default_factory=lambda: list[str]())
+    All three fields are `Optional` because real-world signal text isn't
+    uniformly complaint-shaped — Reddit `[deleted]` titles, Show-HN
+    announcements, off-topic threads, etc. don't contain a clusterable
+    complaint. Haiku is permitted to return `null` for `core_complaint`
+    when no problem statement is discernible (and almost-always-null
+    `vertical`/`keywords` follow). The prepass treats null
+    `core_complaint` as the "skip this signal" signal — see
+    `_haiku_prepass`. Per orchestrator request 024.
+    """
+
+    core_complaint: str | None = None
+    vertical: str | None = None
+    keywords: list[str] | None = Field(default=None)
 
 
 class IdeaCard(BaseModel):
@@ -242,8 +252,19 @@ def _load_unclustered(session: Session, *, limit: int) -> list[tuple[SignalText,
 def _haiku_prepass(
     llm_client: LLMClient, signals: list[tuple[SignalText, RawSignal]]
 ) -> list[_SignalForCluster]:
-    """One mechanic_json("dedup", ...) call per signal. Returns enriched signals."""
+    """One mechanic_json("dedup", ...) call per signal. Returns enriched signals.
+
+    Signals where Haiku returns `core_complaint=None` are dropped from the
+    enriched output AND marked `signal_text.is_low_signal=True` in a fresh
+    independent session, so they don't get re-Haiku'd on future cluster runs
+    (per `_load_unclustered`'s existing is_low_signal filter). The mark is
+    durable across the outer cluster_signals rollback path: if a later step
+    crashes, the per-signal marks from this prepass already committed and
+    survive. Per orchestrator request 024 Q1 (option a — broadened
+    is_low_signal semantics, documented on the model).
+    """
     enriched: list[_SignalForCluster] = []
+    skipped_null = 0
     system = "You normalize one signal into a structured pre-cluster representation."
     for st, _raw in signals:
         user_prompt = prompts.render("dedup_signal.j2", text=st.text, source_kind=st.source_kind)
@@ -253,6 +274,10 @@ def _haiku_prepass(
             [{"role": "user", "content": user_prompt}],
             schema=SignalCoreComplaint,
         )
+        if result.core_complaint is None:
+            _mark_non_clusterable(st.id)
+            skipped_null += 1
+            continue
         enriched.append(
             _SignalForCluster(
                 raw_signal_id=st.raw_signal_id,
@@ -260,11 +285,34 @@ def _haiku_prepass(
                 source_kind=st.source_kind,
                 social_proof_weight=st.social_proof_weight,
                 core_complaint=result.core_complaint,
-                vertical=result.vertical,
-                keywords=result.keywords,
+                # vertical/keywords may still be null when complaint is non-null
+                # (rare but possible); fall back to safe defaults so bucketing
+                # works without per-call branching.
+                vertical=result.vertical or "unknown",
+                keywords=result.keywords or [],
             )
         )
+    if skipped_null:
+        logger.info(
+            "cluster.haiku_skipped_null_complaints",
+            extra={"haiku_skip": {"signals_total": len(signals), "skipped": skipped_null}},
+        )
     return enriched
+
+
+def _mark_non_clusterable(signal_text_id: int) -> None:
+    """Set `signal_text.is_low_signal=True` in an independent transaction.
+
+    Independent so the mark survives even if the outer cluster_signals
+    transaction rolls back later in the run. The mark + `_load_unclustered`'s
+    existing `is_low_signal=False` filter together ensure null-complaint
+    signals don't get re-Haiku'd in future runs.
+    """
+    with SessionLocal() as s:
+        s.execute(
+            update(SignalText).where(SignalText.id == signal_text_id).values(is_low_signal=True)
+        )
+        s.commit()
 
 
 def _bucket(

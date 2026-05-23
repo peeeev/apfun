@@ -5,9 +5,20 @@ the normalization ETL (`apfun.pipeline.normalize`), not in clustering or any
 downstream stage. `signal_text` is the read-shape downstream stages consume.
 
 `raw_signal_id` is UNIQUE — re-running the normalizer updates the existing
-row rather than inserting duplicates. `is_low_signal` flags rows clustering
-should not weight (Reddit `[deleted]`/`[removed]`, anything else the extractors
-mark as noise).
+row rather than inserting duplicates.
+
+`is_low_signal` covers TWO cases — keep this in mind when filtering:
+  1. **Structural** (set during normalization): the row's source content is
+     inherently non-content — Reddit `[deleted]`/`[removed]` bodies and
+     similar extractor-flagged noise.
+  2. **Haiku-judgment** (set during Stage 1 prepass, task 010-fix-1): the
+     LLM dedup pass returned `core_complaint=None` because no clusterable
+     complaint was discernible (Show-HN announcements, off-topic threads,
+     success stories). The pipeline marks these so they don't get re-Haiku'd
+     on every future cluster run. Per orchestrator request 024 Q1 (option a).
+
+`_load_unclustered`'s `is_low_signal=False` filter covers both cases
+uniformly — clustering doesn't need to distinguish them.
 """
 
 from __future__ import annotations

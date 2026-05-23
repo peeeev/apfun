@@ -549,3 +549,194 @@ def test_jsonparseerror_class_truncates_raw_response() -> None:
     long_body = "x" * 3000
     e = JSONParseError("bad", raw_response=long_body)
     assert len(e.raw_response) == 2000
+
+
+# ─────────────────── null core_complaint handling (task 010-fix-1) ────────
+
+
+def test_signal_core_complaint_schema_accepts_null_fields() -> None:
+    """Schema permits null for all three fields (Haiku's honest 'no complaint
+    here' response). Per orchestrator request 024."""
+    parsed = SignalCoreComplaint.model_validate_json(
+        '{"core_complaint": null, "vertical": null, "keywords": null}'
+    )
+    assert parsed.core_complaint is None
+    assert parsed.vertical is None
+    assert parsed.keywords is None
+
+
+def test_haiku_null_fixture_validates() -> None:
+    """The committed null-response fixture validates against the schema —
+    pins the contract for future fixture refreshes."""
+    import json
+    from pathlib import Path
+
+    fixture = json.loads(
+        (Path(__file__).parents[1] / "fixtures" / "llm" / "haiku_dedup_null.json").read_text()
+    )
+    fixture.pop("_fixture_meta", None)
+    parsed = SignalCoreComplaint.model_validate(fixture)
+    assert parsed.core_complaint is None
+
+
+def test_prepass_marks_null_complaint_signal_and_skips_it(
+    session: Session, monkeypatch: Any
+) -> None:
+    """A signal with null core_complaint is marked is_low_signal=True (durable
+    via independent session) and excluded from the enriched output; other
+    signals in the same batch proceed normally."""
+    # Route _mark_non_clusterable's SessionLocal at the test engine.
+    test_factory = type(session)  # bound class for sessionmaker — see conftest
+    monkeypatch.setattr(cluster_mod, "SessionLocal", lambda: test_factory(bind=session.bind))
+
+    src = _make_source(session, kind="reddit", name="r/mixed")
+    _, st_null = _make_signal(session, src, text="[deleted] post body", external_id="ext-null")
+    _, st_real = _make_signal(
+        session, src, text="Stripe proration is broken", external_id="ext-real"
+    )
+    session.commit()
+
+    null_resp = SignalCoreComplaint(core_complaint=None, vertical=None, keywords=None)
+    real_resp = SignalCoreComplaint(
+        core_complaint="Stripe proration miscalculates",
+        vertical="billing",
+        keywords=["stripe", "proration"],
+    )
+    stub = _StubLLM(dedup_responses=[null_resp, real_resp])
+
+    enriched = cluster_mod._haiku_prepass(
+        stub,  # type: ignore[arg-type]
+        [
+            (st_null, session.get(RawSignal, st_null.raw_signal_id)),  # type: ignore[arg-type]
+            (st_real, session.get(RawSignal, st_real.raw_signal_id)),  # type: ignore[arg-type]
+        ],
+    )
+
+    # Only the real signal flows into the enriched output.
+    assert len(enriched) == 1
+    assert enriched[0].raw_signal_id == st_real.raw_signal_id
+    assert enriched[0].core_complaint == "Stripe proration miscalculates"
+
+    # Null signal got durably marked is_low_signal=True.
+    session.expire_all()
+    refreshed_null = session.get(SignalText, st_null.id)
+    assert refreshed_null is not None
+    assert refreshed_null.is_low_signal is True
+    refreshed_real = session.get(SignalText, st_real.id)
+    assert refreshed_real is not None
+    assert refreshed_real.is_low_signal is False
+
+
+def test_prepass_skips_marked_signals_on_subsequent_runs(
+    session: Session, monkeypatch: Any
+) -> None:
+    """Once a signal is marked is_low_signal=True by an earlier null prepass,
+    `_load_unclustered` filters it out — it's not re-Haiku'd on future runs."""
+    test_factory = type(session)
+    monkeypatch.setattr(cluster_mod, "SessionLocal", lambda: test_factory(bind=session.bind))
+
+    src = _make_source(session, kind="reddit", name="r/dedup")
+    _, st_marked = _make_signal(
+        session, src, text="already null-judged", is_low_signal=True, external_id="ext-marked"
+    )
+    _, st_fresh = _make_signal(session, src, text="Real complaint here", external_id="ext-fresh")
+    session.commit()
+
+    # Only ONE response stubbed — if _load_unclustered correctly filters out
+    # the marked signal, only the fresh one reaches Haiku.
+    stub = _StubLLM(
+        dedup_responses=[
+            SignalCoreComplaint(
+                core_complaint="Real complaint normalized",
+                vertical="dev-tools",
+                keywords=["foo"],
+            )
+        ],
+        cluster_responses=[
+            ClusterOutput(
+                clusters=[
+                    IdeaCard(
+                        problem_statement="Real complaint normalized",
+                        suspected_user="user",
+                        seed_keywords=["foo"],
+                        contributing_signal_ids=[st_fresh.raw_signal_id],
+                    )
+                ]
+            ),
+            ClusterMergeOutput(merge_map={}),
+        ],
+    )
+
+    cluster_signals(session, llm_client=stub)  # type: ignore[arg-type]
+    session.commit()
+
+    # Haiku called once — for the unmarked signal only.
+    assert stub.mechanic_calls == 1
+
+
+def test_all_null_batch_completes_cleanly_with_no_candidates(
+    session: Session, monkeypatch: Any
+) -> None:
+    """A batch where every signal returns null core_complaint: no exception,
+    no candidates, no Opus calls, all signals marked is_low_signal=True, and
+    a clean scheduler_runs row with ok=True."""
+    test_factory = type(session)
+    monkeypatch.setattr(cluster_mod, "SessionLocal", lambda: test_factory(bind=session.bind))
+
+    src = _make_source(session, kind="reddit", name="r/allnull")
+    sts: list[SignalText] = []
+    for i in range(3):
+        _, st = _make_signal(session, src, text=f"[deleted] {i}", external_id=f"ext-null-{i}")
+        sts.append(st)
+    session.commit()
+
+    null = SignalCoreComplaint(core_complaint=None, vertical=None, keywords=None)
+    stub = _StubLLM(dedup_responses=[null, null, null])
+
+    result = cluster_signals(session, llm_client=stub)  # type: ignore[arg-type]
+    session.commit()
+
+    # No candidates, no Opus calls.
+    assert result.candidates_inserted == 0
+    assert stub.judge_calls == 0
+    candidates = session.execute(select(Candidate)).scalars().all()
+    assert candidates == []
+
+    # All three signals marked.
+    session.expire_all()
+    for st in sts:
+        refreshed = session.get(SignalText, st.id)
+        assert refreshed is not None
+        assert refreshed.is_low_signal is True
+
+    # Clean scheduler_runs row.
+    sched = session.execute(
+        select(SchedulerRun).where(SchedulerRun.job_id == "pipeline.cluster")
+    ).scalar_one()
+    assert sched.ok is True
+    assert sched.error is None
+
+
+def test_prepass_falls_back_when_complaint_present_but_vertical_null(
+    session: Session, monkeypatch: Any
+) -> None:
+    """Edge: Haiku returns a real complaint but null vertical/keywords. Signal
+    is still clusterable — vertical→'unknown', keywords→[] for bucketing."""
+    test_factory = type(session)
+    monkeypatch.setattr(cluster_mod, "SessionLocal", lambda: test_factory(bind=session.bind))
+
+    src = _make_source(session, kind="hn", name="hn:edge")
+    _, st = _make_signal(session, src, text="ambiguous complaint", external_id="ext-amb")
+    session.commit()
+
+    resp = SignalCoreComplaint(core_complaint="some real complaint", vertical=None, keywords=None)
+    stub = _StubLLM(dedup_responses=[resp])
+
+    enriched = cluster_mod._haiku_prepass(
+        stub,  # type: ignore[arg-type]
+        [(st, session.get(RawSignal, st.raw_signal_id))],  # type: ignore[list-item]
+    )
+
+    assert len(enriched) == 1
+    assert enriched[0].vertical == "unknown"
+    assert enriched[0].keywords == []
