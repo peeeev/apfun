@@ -1,0 +1,15 @@
+{% extends "_base.html" %}
+{% block title %}ops · apfun{% endblock %}
+{% block content %}
+<section class="space-y-4">
+  <header class="flex items-center justify-between">
+    <h1 class="text-xl font-bold font-mono tracking-tight">Ops</h1>
+    <p class="text-xs text-zinc-500 font-mono">read-only · auto-refresh 30s</p>
+  </header>
+
+  {# Only the body polls; the chrome + heading stay stable. #}
+  <div id="ops-body" hx-get="/ops/body" hx-trigger="every 30s" hx-swap="innerHTML">
+    {% include "_ops_body.html" %}
+  </div>
+</section>
+{% endblock %}

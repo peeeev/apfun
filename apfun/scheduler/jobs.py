@@ -35,6 +35,21 @@ from apfun.models import SchedulerRun, Source
 
 logger = logging.getLogger(__name__)
 
+# Canonical set of job IDs `register_all` schedules. Single source of truth so
+# the /ops dashboard can flag a job that's registered in code but missing from
+# the persisted jobstore (status "disabled"). A test asserts register_all
+# registers exactly these. The empty Stage 2 slot (task 011) is intentionally
+# absent until that task wires it in.
+EXPECTED_JOB_IDS: tuple[str, ...] = (
+    "reddit.ingest_batch",
+    "hn.ingest_batch",
+    "producthunt.ingest_batch",
+    "indiehackers.ingest_batch",
+    "review_sites.ingest_batch",
+    "pipeline.normalize",
+    "pipeline.cluster",
+)
+
 
 def _wrap(job_id: str) -> Callable[[Callable[[], None]], Callable[[], None]]:
     """Wrap a job function to log unhandled exceptions to `scheduler_runs`.

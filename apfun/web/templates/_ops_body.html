@@ -1,0 +1,191 @@
+{# Data area of the /ops dashboard. Rendered both inside ops.html and as the
+   standalone HTMX 30s-refresh partial (GET /ops/body). All six sections. #}
+{% if db_busy %}
+  <p class="ops-busy text-amber-300 text-sm">Database temporarily busy — refresh shortly.</p>
+{% else %}
+
+{# ── 1. Summary cards ───────────────────────────────────────────────── #}
+<div class="ops-cards">
+  <a class="ops-card" href="/inbox">
+    <span class="ops-card-label">pending candidates</span>
+    <span class="ops-card-value">{{ cards.pending }}</span>
+  </a>
+  <div class="ops-card">
+    <span class="ops-card-label">today's cost</span>
+    <span class="ops-card-value">${{ "%.2f"|format(cards.today_cost) }}</span>
+  </div>
+  <div class="ops-card">
+    <span class="ops-card-label">last 7d cost</span>
+    <span class="ops-card-value">${{ "%.2f"|format(cards.week_cost) }}</span>
+  </div>
+  <div class="ops-card">
+    <span class="ops-card-label">unprocessed signals</span>
+    <span class="ops-card-value {% if cards.unprocessed > 0 %}text-amber-400{% endif %}">{{ cards.unprocessed }}</span>
+  </div>
+  <div class="ops-card">
+    <span class="ops-card-label">active sources</span>
+    <span class="ops-card-value text-base">
+      {% for s in cards.active_sources %}{{ s.kind }}:{{ s.n }}{% if not loop.last %} {% endif %}{% else %}none{% endfor %}
+    </span>
+  </div>
+  <div class="ops-card">
+    <span class="ops-card-label">cost / candidate</span>
+    <span class="ops-card-value">${{ "%.3f"|format(cards.cost_per_candidate) }}</span>
+  </div>
+</div>
+
+{# ── 2. Scheduler job calendar ──────────────────────────────────────── #}
+<section class="mt-4">
+  <h2 class="ops-h2">Scheduler</h2>
+  <table class="ops-table">
+    <thead><tr><th>job</th><th>next run</th><th>status</th></tr></thead>
+    <tbody>
+      {% for j in jobs %}
+        <tr>
+          <td class="font-mono">{{ j.job_id }}</td>
+          <td title="{{ j.when.abs }}">{{ j.when.rel }}</td>
+          <td>
+            {% if j.status == 'scheduled' %}<span class="text-emerald-300">✓ scheduled</span>
+            {% elif j.status == 'stale' %}<span class="text-red-300 font-bold">⚠ STALE</span>
+            {% else %}<span class="text-zinc-500">⏸ disabled</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{# ── 3. Recent scheduler runs ───────────────────────────────────────── #}
+<section class="mt-4">
+  <h2 class="ops-h2">Recent runs</h2>
+  {% if recent_runs %}
+    <table class="ops-table">
+      <thead><tr><th>when</th><th>job</th><th>ok</th><th>items</th><th>error</th></tr></thead>
+      <tbody>
+        {% for r in recent_runs %}
+          <tr class="{% if not r.ok %}ops-row-error{% endif %}">
+            <td title="{{ r.started.abs }}">{{ r.started.rel }}</td>
+            <td class="font-mono">{{ r.job_id }}</td>
+            <td>{% if r.ok %}<span class="text-emerald-300">✓</span>{% else %}<span class="text-red-300">✗</span>{% endif %}</td>
+            <td>{{ r.items if r.items is not none else "—" }}</td>
+            <td class="ops-err" title="{{ r.error or '' }}">{{ (r.error or "")[:80] }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="text-zinc-500 text-sm">No scheduler runs recorded yet.</p>
+  {% endif %}
+</section>
+
+{# ── 4. Sources health ──────────────────────────────────────────────── #}
+<section class="mt-4">
+  <h2 class="ops-h2">Sources</h2>
+  {% if sources %}
+    {% for grp in sources %}
+      <div class="mt-2">
+        <p class="text-sm font-mono text-zinc-300">{{ grp.kind }} ({{ grp.active }} active, {{ grp.disabled }} disabled)</p>
+        <table class="ops-table">
+          <tbody>
+            {% for row in grp.rows %}
+              <tr class="{% if row.mark == 'fail' %}ops-row-error{% endif %}">
+                <td class="font-mono">{{ row.name }}</td>
+                <td>fails: {{ row.consecutive_failures }}</td>
+                <td title="{{ row.last_ingest.abs }}">last: {{ row.last_ingest.rel }}</td>
+                <td>
+                  {% if row.mark == 'ok' %}<span class="text-emerald-300">✓</span>
+                  {% elif row.mark == 'warn' %}<span class="text-amber-300">⚠</span>
+                  {% else %}<span class="text-red-300">✗</span>{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endfor %}
+  {% else %}
+    <p class="text-zinc-500 text-sm">No sources registered.</p>
+  {% endif %}
+</section>
+
+{# ── 5. LLM cost breakdown ──────────────────────────────────────────── #}
+<section class="mt-4">
+  <h2 class="ops-h2">LLM cost</h2>
+  <p class="text-xs text-zinc-500 mb-2">cache hit ratio: {{ "%.0f"|format(cache_hit_ratio * 100) }}%</p>
+  <div class="ops-two-col">
+    <div>
+      <p class="text-xs text-zinc-400 mb-1">by task (lifetime)</p>
+      {% if cost_by_task %}
+        <table class="ops-table">
+          <thead><tr><th>task</th><th>calls</th><th>avg</th><th>total</th></tr></thead>
+          <tbody>
+            {% for t in cost_by_task %}
+              <tr>
+                <td class="font-mono">{{ t.task }}</td>
+                <td>{{ t.calls }}</td>
+                <td>${{ "%.4f"|format(t.avg_cost) }}</td>
+                <td>${{ "%.3f"|format(t.total_cost) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}<p class="text-zinc-500 text-sm">No LLM calls yet.</p>{% endif %}
+    </div>
+    <div>
+      <p class="text-xs text-zinc-400 mb-1">last 7d by day</p>
+      {% if cost_by_day %}
+        <table class="ops-table">
+          <thead><tr><th>date</th><th>calls</th><th>cost</th></tr></thead>
+          <tbody>
+            {% for d in cost_by_day %}
+              <tr><td class="font-mono">{{ d.date }}</td><td>{{ d.calls }}</td><td>${{ "%.2f"|format(d.cost) }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}<p class="text-zinc-500 text-sm">No LLM calls in the last 7 days.</p>{% endif %}
+    </div>
+  </div>
+</section>
+
+{# ── 6. Recent errors (last 24h) ────────────────────────────────────── #}
+<section class="mt-4">
+  <h2 class="ops-h2">Recent errors (24h)</h2>
+  <div class="ops-two-col">
+    <div>
+      <p class="text-xs text-zinc-400 mb-1">scheduler</p>
+      {% if sched_errors %}
+        <table class="ops-table">
+          <tbody>
+            {% for e in sched_errors %}
+              <tr class="ops-row-error">
+                <td title="{{ e.time.abs }}">{{ e.time.rel }}</td>
+                <td class="font-mono">{{ e.job_id }}</td>
+                <td class="ops-err" title="{{ e.error }}">{{ e.error[:80] }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}<p class="text-emerald-300 text-sm">No errors in last 24h ✓</p>{% endif %}
+    </div>
+    <div>
+      <p class="text-xs text-zinc-400 mb-1">llm</p>
+      {% if llm_errors %}
+        <table class="ops-table">
+          <tbody>
+            {% for e in llm_errors %}
+              <tr class="ops-row-error">
+                <td title="{{ e.time.abs }}">{{ e.time.rel }}</td>
+                <td class="font-mono">{{ e.task }}</td>
+                <td>×{{ e.attempts }}</td>
+                <td class="ops-err" title="{{ e.error }}">{{ e.error[:80] }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}<p class="text-emerald-300 text-sm">No errors in last 24h ✓</p>{% endif %}
+    </div>
+  </div>
+</section>
+
+<p class="text-xs text-zinc-600 mt-4" title="{{ generated.abs }}">rendered {{ generated.abs }}</p>
+{% endif %}
