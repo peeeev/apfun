@@ -319,6 +319,49 @@ def test_recent_runs_renders_items_processed_count_not_dict_method(
     assert ">42<" in body
 
 
+def test_service_started_renders_as_first_row(
+    client_with_session: tuple[TestClient, sessionmaker],
+) -> None:
+    """When the lifespan handler set app.state.started_at, the body's first
+    row shows "service started Xs ago" above the KPI cards.
+
+    The autouse `_stub_scheduler` conftest fixture doesn't set started_at, so
+    the route's `getattr(..., 'started_at', None)` falls back to None. Inject
+    one via app.state directly to exercise the populated path.
+    """
+    client, _ = client_with_session
+    from apfun.main import app
+
+    app.state.started_at = datetime.now(UTC) - timedelta(minutes=12)
+    try:
+        body = client.get("/ops/body").text
+        assert "service started" in body
+        assert 'class="ops-started"' in body
+        # The relative time is rendered (not the em-dash placeholder).
+        assert "12m ago" in body
+        # And the row appears BEFORE the KPI cards in document order.
+        assert body.index('class="ops-started"') < body.index('class="ops-cards"')
+    finally:
+        delattr(app.state, "started_at")
+
+
+def test_service_started_absent_renders_em_dash(
+    client_with_session: tuple[TestClient, sessionmaker],
+) -> None:
+    """No started_at on app.state (e.g., test invocation, fresh dev) → em-dash
+    fallback rather than a crash or a misleading 'just now'."""
+    client, _ = client_with_session
+    from apfun.main import app
+
+    if hasattr(app.state, "started_at"):
+        delattr(app.state, "started_at")
+
+    body = client.get("/ops/body").text
+    assert "service started" in body
+    # The _fmt_rel helper returns "—" for None.
+    assert "—" in body
+
+
 def test_old_errors_excluded_from_24h_errors_section(
     client_with_session: tuple[TestClient, sessionmaker],
 ) -> None:

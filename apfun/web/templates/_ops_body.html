@@ -4,6 +4,12 @@
   <p class="ops-busy text-amber-300 text-sm">Database temporarily busy — refresh shortly.</p>
 {% else %}
 
+{# ── 0. Service start time (first row, above the cards) ──────────────── #}
+<div class="ops-started" title="{{ service_started.abs }}">
+  <span class="ops-started-label">service started</span>
+  <span class="ops-started-value">{{ service_started.rel }}</span>
+</div>
+
 {# ── 1. Summary cards ───────────────────────────────────────────────── #}
 <div class="ops-cards">
   <a class="ops-card" href="/inbox">
