@@ -132,6 +132,13 @@ button:hover, a:hover { text-decoration: none; }
 .tag-alert { background-color: #78350f; color: #fcd34d; }
 
 /* /ops dashboard (task 024) — desktop-oriented, dense tables + KPI cards */
+.ops-started {
+  display: flex; align-items: baseline; gap: 0.75rem;
+  border: 1px solid #27272a; border-left: 4px solid #6ee7b7;
+  border-radius: 0.5rem; padding: 0.5rem 0.75rem; margin-bottom: 0.75rem;
+}
+.ops-started-label { font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.04em; color: #71717a; }
+.ops-started-value { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Code", "Roboto Mono", monospace; color: #f4f4f5; }
 .ops-cards { display: flex; flex-wrap: wrap; gap: 0.75rem; }
 .ops-card {
   display: flex; flex-direction: column; gap: 0.25rem;

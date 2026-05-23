@@ -7,6 +7,7 @@ Apache strips/proxies basic-auth at the edge — this app does NOT look at
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -28,10 +29,13 @@ _TEMPLATES_DIR = Path(__file__).resolve().parent / "web" / "templates"
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Start the APScheduler on app startup; stop on shutdown.
 
-    Stored on `app.state.scheduler` so `/healthz` can report `running`.
+    `app.state.scheduler` lets `/healthz` report `running`.
+    `app.state.started_at` lets `/ops` surface "service started Xh ago" so
+    the operator can confirm a restart picked up the latest code.
     """
     scheduler: BackgroundScheduler = start_scheduler()
     app.state.scheduler = scheduler
+    app.state.started_at = datetime.now(UTC)
     try:
         yield
     finally:

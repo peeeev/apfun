@@ -205,8 +205,13 @@ def _cost_by_day(session: Session, now: datetime) -> list[dict[str, Any]]:
     ]
 
 
-def _collect(session: Session) -> dict[str, Any]:
-    """Build the full dashboard context. One pass; cheap aggregate queries."""
+def _collect(session: Session, started_at: datetime | None = None) -> dict[str, Any]:
+    """Build the full dashboard context. One pass; cheap aggregate queries.
+
+    `started_at` is the process boot time (set in the FastAPI lifespan
+    handler). Renders as "Xh Ym ago" at the top of the page so the operator
+    can confirm a restart picked up the new code. None when not available.
+    """
     now = datetime.now(UTC)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = now - timedelta(days=7)
@@ -278,6 +283,7 @@ def _collect(session: Session) -> dict[str, Any]:
     return {
         "active": "ops",
         "generated": _fmt_rel(now, now=now),
+        "service_started": _fmt_rel(started_at, now=now),
         "cards": {
             "pending": pending,
             "today_cost": float(today_cost),
@@ -329,23 +335,30 @@ def _collect(session: Session) -> dict[str, Any]:
 @router.get("/ops", response_class=HTMLResponse)
 def ops(request: Request, session: Annotated[Session, Depends(_session)]) -> HTMLResponse:
     """Full dashboard page (chrome + body)."""
-    return templates.TemplateResponse(request, "ops.html", _safe_context(session))
+    started_at = getattr(request.app.state, "started_at", None)
+    return templates.TemplateResponse(request, "ops.html", _safe_context(session, started_at))
 
 
 @router.get("/ops/body", response_class=HTMLResponse)
 def ops_body(request: Request, session: Annotated[Session, Depends(_session)]) -> HTMLResponse:
     """Just the data area — polled by HTMX every 30s."""
-    return templates.TemplateResponse(request, "_ops_body.html", _safe_context(session))
+    started_at = getattr(request.app.state, "started_at", None)
+    return templates.TemplateResponse(request, "_ops_body.html", _safe_context(session, started_at))
 
 
-def _safe_context(session: Session) -> dict[str, Any]:
+def _safe_context(session: Session, started_at: datetime | None) -> dict[str, Any]:
     """Collect dashboard data, degrading to a busy-state flag on a locked DB.
 
     SQLite read locks can briefly block under concurrent writes; render a
     "temporarily busy" placeholder rather than 500-ing the operator's page.
+
+    `started_at` comes from `app.state.started_at` (set in the FastAPI
+    lifespan handler) so the dashboard can surface "service started Xh ago" —
+    a quick confirmation that a restart picked up the latest code. Optional;
+    None when called from a test that didn't go through the lifespan.
     """
     try:
-        ctx = _collect(session)
+        ctx = _collect(session, started_at)
         ctx["db_busy"] = False
         return ctx
     except OperationalError:
