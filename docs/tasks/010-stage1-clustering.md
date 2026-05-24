@@ -127,3 +127,5 @@ When Haiku returns null `core_complaint`, `_haiku_prepass`:
 Subsequent runs filter it out via `_load_unclustered`'s existing `is_low_signal=False` gate — no re-Haiku, no wasted cost. This broadens `is_low_signal`'s meaning to cover both structural noise (set during normalization) and LLM-judgment noise (set here). See the `signal_text` model docstring for the dual-meaning note, and the 2026-05-23 Lesson Learned in CLAUDE.md.
 
 If the operator notices the null rate is surprisingly high (>50%) after a run, that's a signal that *either* the incoming content is lower-quality than expected *or* Haiku's null-threshold is too aggressive — escalate to the orchestrator with cost numbers + skip counts before tightening the prompt.
+
+**Null-rate diagnostic procedure:** `docs/operator/runbooks/004-stage1-null-rate-diagnosis.md` (+ `scripts/dump_nulled_signals.py`). Execute when the >50% threshold is exceeded — it surfaces the Haiku-nulled signals for per-signal operator judgment (`correct_null` vs `missed_complaint`), which routes the follow-up (prompt tune vs upstream source curation vs accept). Per orchestrator request 027.
