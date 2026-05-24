@@ -72,3 +72,22 @@ docker exec -it apfun-funnel /workspace/scripts/post-rebuild-bootstrap.sh
 ```
 
 This installs the `sqlite3` CLI (handy for poking the DB) and verifies `gh auth status`. Idempotent.
+
+## Deploying code + running migrations
+
+Code and the live DB both live in the bind-mounted `/workspace` (which stays checked out on `main`). uvicorn runs with `--reload`, so:
+
+**Deploy code (after a PR merges):**
+
+```bash
+cd /workspace        # (or the host bind path) — must be on main
+git pull             # uvicorn --reload picks up the new code automatically; no restart
+```
+
+**Run a migration — ALWAYS snapshot first** (per the post-incident backup discipline; a batch migration with no backup is how `candidate_signals` + `approvals` were lost once):
+
+```bash
+make migrate         # snapshots data/apfun.db → data/backups/, THEN alembic upgrade head
+```
+
+Prefer `make migrate` over a bare `alembic upgrade head` — it runs `scripts/db_snapshot.sh` first (consistent online backup, keeps the most recent 10 in `data/backups/`, gitignored). To snapshot without migrating: `make snapshot`. If a migration ever goes wrong, restore by copying the relevant `data/backups/apfun-<rev>-<ts>.db` back to `data/apfun.db` (with the app stopped).

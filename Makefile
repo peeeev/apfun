@@ -1,4 +1,4 @@
-.PHONY: help fmt fmt-check lint typecheck test test-all check serve serve-dev init-db migrate revision clean
+.PHONY: help fmt fmt-check lint typecheck test test-all check serve serve-dev init-db snapshot migrate revision clean
 
 UV := uv run
 
@@ -13,7 +13,8 @@ help:
 	@echo "make serve            - uvicorn (canonical, no reload)"
 	@echo "make serve-dev        - uvicorn --reload"
 	@echo "make init-db          - create data/ and run alembic upgrade head"
-	@echo "make migrate          - alembic upgrade head"
+	@echo "make snapshot         - back up data/apfun.db to data/backups/ (pre-migration)"
+	@echo "make migrate          - snapshot, then alembic upgrade head"
 	@echo "make revision MSG=... - alembic autogenerate a new revision"
 	@echo "make clean            - remove __pycache__ and tool caches"
 
@@ -46,7 +47,13 @@ serve-dev:
 init-db:
 	$(UV) python scripts/init_db.py
 
-migrate:
+snapshot:
+	bash scripts/db_snapshot.sh
+
+# Snapshots the DB first (pre-migration backup discipline, feedback 029).
+# Prefer `make migrate` over raw `alembic upgrade head` so the snapshot
+# always happens.
+migrate: snapshot
 	$(UV) alembic upgrade head
 
 revision:
