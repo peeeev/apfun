@@ -135,6 +135,17 @@ button:hover, a:hover { text-decoration: none; }
 .tag-alert { background-color: #78350f; color: #fcd34d; }
 .tag-source { background-color: #1e293b; color: #cbd5e1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
+/* Buildability badges (task 015) — green→buildable, gray→non-software. */
+.tag-build-high { background-color: #064e3b; color: #6ee7b7; }
+.tag-build-medium { background-color: #713f12; color: #fde68a; }
+.tag-build-low { background-color: #7c2d12; color: #fdba74; }
+.tag-build-none { background-color: #27272a; color: #a1a1aa; }
+.ops-build-rationale {
+  border: 1px solid #27272a; border-left: 4px solid #3f3f46;
+  border-radius: 0.5rem; padding: 0.5rem 0.75rem;
+  display: flex; flex-direction: column; gap: 0.25rem;
+}
+
 /* Inbox decision controls (task 014-fix-1) */
 .btn-unsure { background-color: #3f3f46; color: #d4d4d8; }
 .btn-unsure:hover { background-color: #52525b; color: #fff; }

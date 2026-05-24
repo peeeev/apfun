@@ -7,6 +7,16 @@
   {# Reuse the card for the header + decision controls (re-decidable here too). #}
   {% include "_candidate_card.html" %}
 
+  {% if c.buildability_label %}
+    <section class="ops-build-rationale">
+      <span class="tag {{ c.buildability_css }}">{{ c.buildability_label }}</span>
+      <span class="text-xs text-zinc-500 font-mono">buildability: {{ c.buildability }}</span>
+      {% if c.buildability_rationale %}
+        <p class="text-sm text-zinc-300 leading-snug mt-1">{{ c.buildability_rationale }}</p>
+      {% endif %}
+    </section>
+  {% endif %}
+
   <section class="mt-4">
     <h2 class="text-base font-bold font-mono mb-2">Contributing signals ({{ signals|length }})</h2>
     {% if signals %}

@@ -39,6 +39,7 @@ from apfun.db import SessionLocal, try_insert
 from apfun.llm import prompts
 from apfun.llm.client import LLMClient
 from apfun.models import (
+    Buildability,
     Candidate,
     CandidateSignal,
     Decision,
@@ -86,13 +87,31 @@ class SignalCoreComplaint(BaseModel):
     keywords: list[str] | None = Field(default=None)
 
 
+class BuildabilityAssessment(BaseModel):
+    """Stage 1's buildability judgment — emitted inline by the cluster pass and
+    standalone by the backfill (`buildability_only.j2`). Both fields are
+    required: the schema deliberately has no default for `buildability`, so an
+    LLM response (or an old fixture) that omits it fails validation rather than
+    silently defaulting. Per orchestrator request 030 (task 015)."""
+
+    buildability: Buildability
+    buildability_rationale: str
+
+
 class IdeaCard(BaseModel):
-    """One clustered idea emitted by `judge_json("cluster", ...)` pass 1."""
+    """One clustered idea emitted by `judge_json("cluster", ...)` pass 1.
+
+    `buildability` + `buildability_rationale` are required (no defaults) — the
+    cluster prompt emits them as a separate reasoning step after clustering, and
+    a missing value should fail validation loudly (see `BuildabilityAssessment`).
+    """
 
     problem_statement: str
     suspected_user: str | None = None
     seed_keywords: list[str] = Field(default_factory=lambda: list[str]())
     contributing_signal_ids: list[int] = Field(default_factory=lambda: list[int]())
+    buildability: Buildability
+    buildability_rationale: str
 
 
 class ClusterOutput(BaseModel):
@@ -399,6 +418,10 @@ def _persist_clusters(
             select(Candidate).where(Candidate.dedup_key == dedup_key)
         ).scalar_one_or_none()
         if existing is not None:
+            # Reuse the existing candidate (HITL-durable; see feedback 016 Q5).
+            # Buildability is assessed once, at first-creation — a dedup match
+            # does NOT re-assess (the spec's "single one-time assessment; future
+            # candidates get assessed at cluster time"). Leave it untouched.
             candidate = existing
         else:
             candidate = Candidate(
@@ -409,6 +432,9 @@ def _persist_clusters(
                 dedup_key=dedup_key,
                 decision=Decision.PENDING,
                 pipeline_stage=PipelineStage.NONE,
+                buildability=card.buildability,
+                buildability_rationale=card.buildability_rationale,
+                buildability_assessed_at=datetime.now(UTC),
             )
             session.add(candidate)
             session.flush()
@@ -483,6 +509,7 @@ def _run_pass_2_merge(
 
 
 __all__ = [
+    "BuildabilityAssessment",
     "ClusterMergeOutput",
     "ClusterOutput",
     "ClusterResult",

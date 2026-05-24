@@ -6,6 +6,9 @@
       <a href="/inbox/{{ c.id }}" class="hover:text-white">{{ c.problem_statement }}</a>
     </h3>
     <div class="flex flex-col items-end gap-1">
+      {% if c.buildability_label %}
+        <span class="tag {{ c.buildability_css }}" title="buildability: {{ c.buildability }}">{{ c.buildability_label }}</span>
+      {% endif %}
       <span class="tag tag-vertical">{{ c.vertical or "no-vertical" }}</span>
       <span class="tag tag-signals">{{ c.signals_total }} signal{{ '' if c.signals_total == 1 else 's' }} · w={{ "%.0f"|format(c.weight_total) }}</span>
       {% if c.decision == "rejected" and c.signals_since_rejection > 0 %}

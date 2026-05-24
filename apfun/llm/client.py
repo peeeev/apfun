@@ -51,6 +51,7 @@ MECHANIC_MODEL: str = "claude-haiku-4-5"
 JUDGMENT_TASKS: frozenset[str] = frozenset(
     {
         "cluster",  # Stage 1: clustering raw signals into idea cards
+        "buildability",  # Stage 1: is the complaint software-addressable? (task 015)
         "score",  # Stage 4: complaint clustering for UnmetPain
         "synthesize",  # Stage 5: differentiation synthesis
         "prd",  # Gate 1: PRD generation
@@ -99,6 +100,7 @@ PRICING: dict[str, dict[str, float]] = {
 # verified 2026-05-22 https://docs.anthropic.com/en/api/messages
 DEFAULT_EFFORT: dict[str, Effort] = {
     "cluster": "medium",  # Stage 1: dedup over narrow choices
+    "buildability": "medium",  # Stage 1: bounded 4-way classification — like cluster
     "score": "high",  # Stage 4: quantitative weighing
     "synthesize": "xhigh",  # Stage 5: differentiation — the highest-stakes call
     "prd": "high",  # Gate 1: PRD generation

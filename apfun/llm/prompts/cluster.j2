@@ -19,6 +19,30 @@ Rules — these are load-bearing:
 6. `seed_keywords` are 3-6 lowercase concrete terms useful for a future
    demand-signal search.
 
+After you have identified the clusters (step 1 above), do a SEPARATE second
+step for each cluster: assess its BUILDABILITY. This is an independent judgment
+from cluster quality. A weak cluster about a software-addressable problem is
+still `high` buildability; a strong, well-evidenced cluster about a non-software
+problem is still `non_software`. Don't let one judgment color the other.
+
+Could a small team build a software, SaaS, or service product that meaningfully
+addresses this problem? Return one of:
+
+- `high`: Clearly software-addressable. Analogous products exist (or used to)
+  for related problems. A founder could plausibly start building next week.
+- `medium`: Partially software-addressable. Some aspects (workflow, data,
+  communication) can be built; some (regulation, network effects, hardware)
+  need non-software complements.
+- `low`: Software is a minor part of the solution. The real problem needs human
+  judgment, regulation, capital, or scale that software alone won't provide.
+- `non_software`: Not a software/SaaS/service opportunity at all. The complaint
+  is cultural, regulatory, philosophical, or one where any software involvement
+  would be tangential.
+
+`buildability_rationale` is 1-2 sentences explaining the judgment. Be specific —
+name the software-addressable components if `high`/`medium`, or name what's
+missing if `low`/`non_software`.
+
 Return STRICT JSON matching this schema. No prose, no markdown.
 
 {
@@ -27,7 +51,9 @@ Return STRICT JSON matching this schema. No prose, no markdown.
       "problem_statement": "single-paragraph description of the unmet need, grounded in the signal evidence",
       "suspected_user": "one phrase describing who feels this | null",
       "seed_keywords": ["3-6", "lowercase", "concrete", "terms"],
-      "contributing_signal_ids": [<int>, <int>, ...]
+      "contributing_signal_ids": [<int>, <int>, ...],
+      "buildability": "high | medium | low | non_software",
+      "buildability_rationale": "1-2 sentences naming the software-addressable components, or what's missing"
     }
   ]
 }
