@@ -407,8 +407,13 @@ def restart_scheduler(
 
     # Return the refreshed body — same partial the 30s auto-refresh uses,
     # so the operator immediately sees the new next_run_times and the
-    # ops.manual_restart row in Recent runs.
-    return templates.TemplateResponse(request, "_ops_body.html", _safe_context(session))
+    # ops.manual_restart row in Recent runs. `service_started` is the process
+    # boot time (distinct from the local `started_at`, which timed this
+    # restart); thread it through so the body's "service started" row renders.
+    service_started = getattr(request.app.state, "started_at", None)
+    return templates.TemplateResponse(
+        request, "_ops_body.html", _safe_context(session, service_started)
+    )
 
 
 def _safe_context(session: Session, started_at: datetime | None) -> dict[str, Any]:
