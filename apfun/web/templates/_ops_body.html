@@ -4,6 +4,12 @@
   <p class="ops-busy text-amber-300 text-sm">Database temporarily busy — refresh shortly.</p>
 {% else %}
 
+{# ── 0. Service start time (first row, above the cards) ──────────────── #}
+<div class="ops-started" title="{{ service_started.abs }}">
+  <span class="ops-started-label">service started</span>
+  <span class="ops-started-value">{{ service_started.rel }}</span>
+</div>
+
 {# ── 1. Summary cards ───────────────────────────────────────────────── #}
 <div class="ops-cards">
   <a class="ops-card" href="/inbox">
@@ -36,7 +42,17 @@
 
 {# ── 2. Scheduler job calendar ──────────────────────────────────────── #}
 <section class="mt-4">
-  <h2 class="ops-h2">Scheduler</h2>
+  <header class="flex items-center justify-between mb-2">
+    <h2 class="ops-h2" style="margin-bottom: 0">Scheduler</h2>
+    <button class="btn btn-restart"
+            hx-post="/ops/scheduler/restart"
+            hx-target="#ops-body"
+            hx-swap="innerHTML"
+            hx-confirm="Restart the scheduler? In-flight jobs will be aborted; uvicorn keeps running."
+            hx-disabled-elt="this">
+      restart scheduler
+    </button>
+  </header>
   <table class="ops-table">
     <thead><tr><th>job</th><th>next run</th><th>status</th></tr></thead>
     <tbody>
