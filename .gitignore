@@ -28,6 +28,7 @@ htmlcov/
 
 # Data (SQLite DB lives here)
 data/
+data/backups/   # pre-migration snapshots from scripts/db_snapshot.sh (covered by data/, explicit for intent)
 *.db
 *.sqlite
 *.sqlite3
