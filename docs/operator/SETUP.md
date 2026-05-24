@@ -8,6 +8,8 @@ Everything under `apfun.online` is protected by the vhost's basic-auth; the app 
 
 - **`/inbox`** — HITL review queue: pending candidates, approve/reject.
 - **`/ops`** — read-only operator dashboard (task 024): KPI cards, scheduler job calendar with STALE warnings, recent runs, source health, LLM cost, recent errors. Auto-refreshes every 30s. Desktop-oriented. This is the at-a-glance health view — check it instead of SSH-ing in to run `sqlite3` queries.
+- **`/inbox/<id>`** — candidate detail view (task 014-fix-1): every contributing signal with its text, source label, and a link to the original post; plus decision history.
+- **`/inbox/approved`**, **`/inbox/rejected`**, **`/inbox/unsure`** — status-filtered listings (task 014-fix-1). Any listed candidate can be re-decided (approve/reject/unsure with optional notes). "Unsure" = looked but couldn't decide (distinct from pending = not yet looked at).
 - `/opportunities`, `/sources`, `/projects` — placeholders until tasks 020/021.
 
 The container is built and started via the host's `docker-compose.yml` at `/srv/claude/apfun.online/` — this guide assumes that exists. Everything below configures *env vars* that the container reads; the canonical place for them is the `.env` file next to the host docker-compose. See `.env.example` in the repo for the full template.
