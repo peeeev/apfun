@@ -28,34 +28,43 @@ _REPO = Path(__file__).resolve().parents[2]
 # down_revision of the unsure migration — the batch recreate under test.
 _PRE_UNSURE = "16b3688378b5"
 
+# Seed/assert via raw sqlite3, NOT the ORM. The live ORM model floats ahead of
+# this past revision (it has columns later migrations add, e.g. buildability), so
+# an ORM INSERT would emit columns the pre-`_PRE_UNSURE` schema lacks. Raw SQL
+# pins exactly the columns that exist at the seed revision.
 _SEED = """
+import os, sqlite3
 from datetime import UTC, datetime
-from apfun.db import SessionLocal
-from apfun.models import (
-    Source, RawSignal, Candidate, CandidateSignal, Approval,
-    ApprovalDecision, Decision, PipelineStage,
-)
-with SessionLocal() as s:
-    src = Source(kind="hn", name="hn:x", config_json={}); s.add(src); s.flush()
-    raw = RawSignal(source_id=src.id, external_id="e1", url="u",
-                    captured_at=datetime.now(UTC), content_hash="h1", payload_json={})
-    s.add(raw); s.flush()
-    c = Candidate(problem_statement="p", seed_keywords_json=[], dedup_key="k1",
-                  decision=Decision.PENDING, pipeline_stage=PipelineStage.NONE)
-    s.add(c); s.flush()
-    s.add(CandidateSignal(candidate_id=c.id, raw_signal_id=raw.id))
-    s.add(Approval(candidate_id=c.id, decision=ApprovalDecision.APPROVE,
-                   comment="note", decided_at=datetime.now(UTC)))
-    s.commit()
+path = os.environ["APFUN_DB_URL"].replace("sqlite:///", "", 1)
+now = datetime.now(UTC).isoformat()
+con = sqlite3.connect(path); cur = con.cursor()
+cur.execute("INSERT INTO sources (kind,name,config_json,is_active,created_at,updated_at)"
+            " VALUES ('hn','hn:x','{}',1,?,?)", (now, now))
+sid = cur.lastrowid
+cur.execute(
+"INSERT INTO raw_signals"
+" (source_id,external_id,url,captured_at,content_hash,payload_json,created_at,updated_at)"
+" VALUES (?,?,?,?,?,?,?,?)", (sid, "e1", "u", now, "h1", "{}", now, now))
+rid = cur.lastrowid
+cur.execute(
+"INSERT INTO candidates"
+" (problem_statement,seed_keywords_json,dedup_key,decision,pipeline_stage,created_at,updated_at)"
+" VALUES ('p','[]','k1','pending','none',?,?)", (now, now))
+cid = cur.lastrowid
+cur.execute("INSERT INTO candidate_signals (candidate_id,raw_signal_id,created_at)"
+            " VALUES (?,?,?)", (cid, rid, now))
+cur.execute("INSERT INTO approvals (candidate_id,decision,decided_at,created_at,updated_at)"
+            " VALUES (?,'approve',?,?,?)", (cid, now, now, now))
+con.commit(); con.close()
 """
 
 _ASSERT = """
-from sqlalchemy import func, select
-from apfun.db import SessionLocal
-from apfun.models import CandidateSignal, Approval
-with SessionLocal() as s:
-    cs = s.execute(select(func.count()).select_from(CandidateSignal)).scalar_one()
-    ap = s.execute(select(func.count()).select_from(Approval)).scalar_one()
+import os, sqlite3
+path = os.environ["APFUN_DB_URL"].replace("sqlite:///", "", 1)
+con = sqlite3.connect(path)
+cs = con.execute("SELECT COUNT(*) FROM candidate_signals").fetchone()[0]
+ap = con.execute("SELECT COUNT(*) FROM approvals").fetchone()[0]
+con.close()
 assert cs == 1, f"candidate_signals wiped: {cs}"
 assert ap == 1, f"approvals wiped: {ap}"
 """

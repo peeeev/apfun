@@ -49,6 +49,7 @@ Sequenced, PR-sized, each ~half-day and independently testable. Numbers are the 
 - 005b — Reddit OAuth migration (ABANDONED — Reddit closed self-service OAuth in Nov 2025 under the Responsible Builder Policy; superseded by 005c). Per orchestrator request 020.
 - 005c — Reddit residential-proxy + browser-UA migration (post-005b reversal after Reddit API and frontend policy changes; anonymous public-JSON path through `APFUN_REDDIT_HTTP_PROXY` + rotating Chrome UAs). Per orchestrator request 021.
 - 024 — `/ops` read-only operator dashboard (KPI cards, scheduler calendar with STALE warnings, source health, LLM cost, recent errors; behind Apache htpasswd). Per orchestrator request 023.
+- 025 — Buildability layer: Stage 1's first *evaluation* output (`high`/`medium`/`low`/`non_software` + rationale on `candidates`, via a `cluster.j2` extension + one-time backfill of existing candidates; inbox badges + optional `?hide_non_software` filter). A hint, not a gate; does not feed composite weight. Per orchestrator request 030 (Part 2 of `029-feedback.md`; the request's "task 015" label was a collision with `015-dataforseo-client` — renumbered to 025).
 
 ## Open questions (from brief §14, parked)
 

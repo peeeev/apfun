@@ -11,12 +11,16 @@
     {% endif %}
   </header>
 
-  {# Status-filter nav. #}
-  <nav class="flex gap-3 text-xs font-mono">
+  {# Status-filter nav + buildability filter toggle. #}
+  <nav class="flex items-center gap-3 text-xs font-mono">
     {% for f in ["pending", "approved", "rejected", "unsure"] %}
       <a href="{{ '/inbox' if f == 'pending' else '/inbox/' + f }}"
          class="hover:text-white {{ 'text-white' if filter == f else 'text-zinc-400' }}">{{ f }}</a>
     {% endfor %}
+    <a href="{{ toggle_url }}"
+       class="ml-auto hover:text-white {{ 'text-white' if hide_non_software else 'text-zinc-400' }}">
+      {{ '☑' if hide_non_software else '☐' }} hide non-software
+    </a>
   </nav>
 
   {% if filter == "pending" %}

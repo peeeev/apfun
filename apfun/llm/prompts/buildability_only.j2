@@ -1,0 +1,35 @@
+{% include "_shared.j2" %}
+
+You are assessing the BUILDABILITY of a single opportunity card from a SaaS
+opportunity funnel. There is no clustering to do here — just the buildability
+judgment.
+
+OPPORTUNITY CARD:
+Problem statement: {{ problem_statement }}
+Suspected user: {{ suspected_user or "not identified" }}
+Seed keywords: {{ keywords | join(", ") if keywords else "none" }}
+
+Could a small team build a software, SaaS, or service product that meaningfully
+addresses this problem? Return one of:
+
+- `high`: Clearly software-addressable. Analogous products exist (or used to)
+  for related problems. A founder could plausibly start building next week.
+- `medium`: Partially software-addressable. Some aspects (workflow, data,
+  communication) can be built; some (regulation, network effects, hardware)
+  need non-software complements.
+- `low`: Software is a minor part of the solution. The real problem needs human
+  judgment, regulation, capital, or scale that software alone won't provide.
+- `non_software`: Not a software/SaaS/service opportunity at all. The complaint
+  is cultural, regulatory, philosophical, or one where any software involvement
+  would be tangential.
+
+`buildability_rationale` is 1-2 sentences explaining the judgment. Be specific —
+name the software-addressable components if `high`/`medium`, or name what's
+missing if `low`/`non_software`.
+
+Return STRICT JSON matching this schema. No prose, no markdown.
+
+{
+  "buildability": "high | medium | low | non_software",
+  "buildability_rationale": "1-2 sentences naming the software-addressable components, or what's missing"
+}

@@ -3,7 +3,13 @@
 from apfun.models.api_usage import ApiUsage
 from apfun.models.approval import Approval, ApprovalDecision
 from apfun.models.base import Base, IdMixin, TimestampMixin
-from apfun.models.candidate import Candidate, CandidateSignal, Decision, PipelineStage
+from apfun.models.candidate import (
+    Buildability,
+    Candidate,
+    CandidateSignal,
+    Decision,
+    PipelineStage,
+)
 from apfun.models.competitive_analysis import CompetitiveAnalysis
 from apfun.models.demand_check import DemandCheck, DemandVerdict
 from apfun.models.llm_run import LLMRun
@@ -20,6 +26,7 @@ __all__ = [
     "Approval",
     "ApprovalDecision",
     "Base",
+    "Buildability",
     "Candidate",
     "CandidateSignal",
     "CompetitiveAnalysis",

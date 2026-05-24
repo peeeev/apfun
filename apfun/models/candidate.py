@@ -42,6 +42,23 @@ class PipelineStage(StrEnum):
     FAILED = "failed"
 
 
+class Buildability(StrEnum):
+    """Stage 1's first *evaluation* judgment: is the complaint software-addressable?
+
+    Set at cluster time for new candidates (the `cluster.j2` Opus call now emits
+    it alongside the cluster) and backfilled once for pre-existing candidates via
+    `scripts/backfill_buildability.py`. It's a *hint*, never a gate — the operator
+    can approve a `non_software` candidate anyway, and buildability does NOT feed
+    the composite weight (which stays social-proof-only). Per orchestrator
+    request 030 (task 015).
+    """
+
+    HIGH = "high"  # clearly software-addressable; a founder could start next week
+    MEDIUM = "medium"  # partly software-addressable; needs non-software complements
+    LOW = "low"  # software is a minor part; needs judgment/regulation/capital/scale
+    NON_SOFTWARE = "non_software"  # cultural/regulatory/philosophical — not a product
+
+
 class Candidate(Base, IdMixin, TimestampMixin):
     __tablename__ = "candidates"
     __table_args__ = (
@@ -49,6 +66,14 @@ class Candidate(Base, IdMixin, TimestampMixin):
         CheckConstraint(
             check_enum_sql("pipeline_stage", PipelineStage),
             name="ck_candidates_pipeline_stage",
+        ),
+        # Nullable: a NULL `buildability` (not yet assessed) satisfies the CHECK
+        # because `NULL IN (...)` evaluates to NULL, which SQLite treats as a
+        # passing constraint. No `OR ... IS NULL` clause needed — keeps this
+        # identical to the migration's `check_enum_sql` output.
+        CheckConstraint(
+            check_enum_sql("buildability", Buildability),
+            name="ck_candidates_buildability",
         ),
     )
 
@@ -80,6 +105,26 @@ class Candidate(Base, IdMixin, TimestampMixin):
         default=PipelineStage.NONE,
         nullable=False,
         index=True,
+    )
+    # Buildability (task 015). NULL = not yet assessed (rare after the one-time
+    # backfill; new candidates always get a value at cluster time). Not indexed:
+    # 4-value low-cardinality column on a small table, and the inbox filter is a
+    # cheap in-Python exclusion, not a hot query path.
+    buildability: Mapped[Buildability | None] = mapped_column(
+        Enum(
+            Buildability,
+            native_enum=False,
+            length=20,
+            validate_strings=True,
+            values_callable=enum_values,
+        ),
+        nullable=True,
+    )
+    buildability_rationale: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="", default=""
+    )
+    buildability_assessed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 

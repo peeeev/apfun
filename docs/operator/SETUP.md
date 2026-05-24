@@ -72,3 +72,19 @@ docker exec -it apfun-funnel /workspace/scripts/post-rebuild-bootstrap.sh
 ```
 
 This installs the `sqlite3` CLI (handy for poking the DB) and verifies `gh auth status`. Idempotent.
+
+## Buildability backfill (task 025)
+
+The cluster pass assesses **buildability** (`high`/`medium`/`low`/`non_software`) for every *new* candidate inline. Candidates created before the buildability layer existed have `buildability IS NULL` and need a one-time backfill so the inbox badges are consistent. After the migration that adds the columns (`4e8f1a2b9c3d`) is applied (snapshot the DB first — see the deploy/migration ritual):
+
+```bash
+# 1. Eyeball a handful first (no commitment) — spot-check the values look sane.
+APFUN_ANTHROPIC_API_KEY=... uv run python scripts/backfill_buildability.py --limit 10
+
+# 2. Full backfill of all unassessed candidates.
+APFUN_ANTHROPIC_API_KEY=... uv run python scripts/backfill_buildability.py
+```
+
+It's idempotent (skips already-assessed candidates; per-candidate commit, so a crash is safe to resume by re-running) and aborts if the run cost exceeds `--budget` (default $5; expect ~$1.25 for ~168 candidates). `--dry-run` lists what would be assessed without spending a token. On a **fresh install** with no pre-existing candidates, there's nothing to backfill — new candidates get buildability at cluster time.
+
+After the backfill, refresh `/inbox` and verify the badges render; the detail view (`/inbox/<id>`) shows each candidate's buildability rationale. Buildability is a *hint* — you can still approve a `non_software` candidate; the `☐ hide non-software` toggle filters them from the listing if you want.

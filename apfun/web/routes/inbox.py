@@ -57,6 +57,24 @@ _APPROVAL_TO_DECISION: dict[ApprovalDecision, Decision] = {
 # How many source badges to show inline before collapsing to "+N more".
 _MAX_BADGES = 3
 
+# buildability value → (badge label, css class). Per orchestrator request 030.
+# A null buildability (unassessed) renders no badge — handled in the template.
+_BUILDABILITY_BADGE: dict[str, tuple[str, str]] = {
+    "high": ("Buildable", "tag-build-high"),
+    "medium": ("Maybe", "tag-build-medium"),
+    "low": ("Unlikely", "tag-build-low"),
+    "non_software": ("Non-software", "tag-build-none"),
+}
+
+
+def _toggle_url(base: str, *, currently_hidden: bool) -> str:
+    """URL that flips the `hide_non_software` filter (bookmarkable query param)."""
+    return base if currently_hidden else f"{base}?hide_non_software=true"
+
+
+def _hide_non_software(request: Request) -> bool:
+    return request.query_params.get("hide_non_software") == "true"
+
 
 def _session() -> Iterator[Session]:
     """FastAPI dependency: yield a sync Session, close on exit."""
@@ -139,6 +157,9 @@ def _candidate_view(session: Session, candidate: Candidate) -> dict[str, Any]:
 
     badges, badges_more = _source_badges(session, candidate.id)
 
+    build_value = candidate.buildability.value if candidate.buildability is not None else None
+    build_badge = _BUILDABILITY_BADGE.get(build_value) if build_value else None
+
     return {
         "id": candidate.id,
         "problem_statement": candidate.problem_statement,
@@ -147,6 +168,10 @@ def _candidate_view(session: Session, candidate: Candidate) -> dict[str, Any]:
         "vertical": candidate.vertical,
         "decision": candidate.decision.value,
         "pipeline_stage": candidate.pipeline_stage.value,
+        "buildability": build_value,
+        "buildability_label": build_badge[0] if build_badge else None,
+        "buildability_css": build_badge[1] if build_badge else None,
+        "buildability_rationale": candidate.buildability_rationale or "",
         "weight_total": weight_total,
         "signals_total": len(sig_rows),
         "signals_since_rejection": signals_since_rejection,
@@ -187,6 +212,8 @@ def inbox(request: Request, session: Annotated[Session, Depends(_session)]) -> H
         .all()
     )
 
+    hide_ns = _hide_non_software(request)
+
     pending_views = [_candidate_view(session, c) for c in pending]
     pending_views.sort(key=lambda v: -v["weight_total"])
     rejected_views = [
@@ -194,6 +221,9 @@ def inbox(request: Request, session: Annotated[Session, Depends(_session)]) -> H
         for v in (_candidate_view(session, c) for c in rejected)
         if v["signals_since_rejection"] > 0
     ]
+    if hide_ns:
+        pending_views = [v for v in pending_views if v["buildability"] != "non_software"]
+        rejected_views = [v for v in rejected_views if v["buildability"] != "non_software"]
 
     return templates.TemplateResponse(
         request,
@@ -203,6 +233,8 @@ def inbox(request: Request, session: Annotated[Session, Depends(_session)]) -> H
             "filter": "pending",
             "pending": pending_views,
             "rejected_with_new_signals": rejected_views,
+            "hide_non_software": hide_ns,
+            "toggle_url": _toggle_url("/inbox", currently_hidden=hide_ns),
         },
     )
 
@@ -292,6 +324,7 @@ def inbox_filtered(
     if status not in _FILTERS:
         raise HTTPException(status_code=404, detail=f"unknown inbox filter: {status}")
     decision, empty_msg = _FILTERS[status]
+    hide_ns = _hide_non_software(request)
     candidates = (
         session.execute(
             select(Candidate).where(Candidate.decision == decision).order_by(Candidate.id.desc())
@@ -300,6 +333,8 @@ def inbox_filtered(
         .all()
     )
     views = [_candidate_view(session, c) for c in candidates]
+    if hide_ns:
+        views = [v for v in views if v["buildability"] != "non_software"]
     return templates.TemplateResponse(
         request,
         "inbox.html",
@@ -308,6 +343,8 @@ def inbox_filtered(
             "filter": status,
             "filtered": views,
             "filtered_empty_msg": empty_msg,
+            "hide_non_software": hide_ns,
+            "toggle_url": _toggle_url(f"/inbox/{status}", currently_hidden=hide_ns),
         },
     )
 

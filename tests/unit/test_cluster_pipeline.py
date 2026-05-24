@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from apfun.llm.client import JSONParseError
 from apfun.models import (
+    Buildability,
     Candidate,
     CandidateSignal,
     Decision,
@@ -36,6 +37,17 @@ from apfun.pipeline.cluster import (
 )
 
 # ─────────────────────────────── helpers ──────────────────────────────
+
+
+def _card(**kwargs: Any) -> IdeaCard:
+    """IdeaCard with buildability defaulted. Most cluster tests predate the
+    buildability layer and don't exercise it; the field is required on the
+    schema (see `test_idea_card_requires_buildability`), so default it here to
+    keep those tests focused on clustering behavior. Tests that DO care pass an
+    explicit `buildability=`."""
+    kwargs.setdefault("buildability", Buildability.HIGH)
+    kwargs.setdefault("buildability_rationale", "test rationale")
+    return IdeaCard(**kwargs)
 
 
 def _make_source(session: Session, kind: str = "reddit", name: str = "r/SaaS") -> Source:
@@ -89,7 +101,10 @@ class _StubLLM:
         self,
         *,
         dedup_responses: list[SignalCoreComplaint] | None = None,
-        cluster_responses: list[ClusterOutput] | None = None,
+        # Accepts ClusterMergeOutput too: some tests script a pass-2 merge
+        # response after the pass-1 ClusterOutput. The stub returns whatever it
+        # pops, so the union is the honest type.
+        cluster_responses: list[ClusterOutput | ClusterMergeOutput] | None = None,
     ) -> None:
         self._dedup = list(dedup_responses or [])
         self._cluster = list(cluster_responses or [])
@@ -188,7 +203,7 @@ def test_cluster_signals_persists_candidate_and_links_signals(session: Session) 
         cluster_responses=[
             ClusterOutput(
                 clusters=[
-                    IdeaCard(
+                    _card(
                         problem_statement="Founders struggle with Stripe edge cases",
                         suspected_user="solo SaaS founders",
                         seed_keywords=["stripe", "proration", "dunning"],
@@ -236,7 +251,7 @@ def test_idempotency_skips_already_clustered_signals(session: Session) -> None:
         cluster_responses=[
             ClusterOutput(
                 clusters=[
-                    IdeaCard(
+                    _card(
                         problem_statement="alpha problem",
                         seed_keywords=["k"],
                         contributing_signal_ids=[raw.id],
@@ -316,7 +331,7 @@ def test_dedup_key_match_links_to_rejected_without_flipping_decision(
         cluster_responses=[
             ClusterOutput(
                 clusters=[
-                    IdeaCard(
+                    _card(
                         problem_statement=problem,
                         seed_keywords=["billing"],
                         contributing_signal_ids=[raw.id],
@@ -372,7 +387,7 @@ def test_cap_on_buckets_processes_largest_first_and_marks_capped(session: Sessio
         cluster_responses=[
             ClusterOutput(
                 clusters=[
-                    IdeaCard(
+                    _card(
                         problem_statement=f"problem {i}",
                         seed_keywords=[f"k{i}"],
                         contributing_signal_ids=[raws[i].id],
@@ -455,12 +470,12 @@ def test_card_with_hallucinated_signal_ids_is_dropped(session: Session) -> None:
         cluster_responses=[
             ClusterOutput(
                 clusters=[
-                    IdeaCard(
+                    _card(
                         problem_statement="hallucinated",
                         seed_keywords=["k"],
                         contributing_signal_ids=[raw.id + 9999],  # invalid id
                     ),
-                    IdeaCard(
+                    _card(
                         problem_statement="valid card",
                         seed_keywords=["k"],
                         contributing_signal_ids=[raw.id],
@@ -504,8 +519,8 @@ def test_cluster_merge_filters_invalid_canonical_ids() -> None:
             return ClusterMergeOutput(merge_map=self.merge_map)
 
     pass1 = {
-        "c1": IdeaCard(problem_statement="A"),
-        "c2": IdeaCard(problem_statement="B"),
+        "c1": _card(problem_statement="A"),
+        "c2": _card(problem_statement="B"),
     }
     mock_client = _MockJudgeStub({"c1": "c1", "c2": "c1", "ghost": "c1"})
     cleaned = cluster_mod._run_pass_2_merge(mock_client, pass1)  # type: ignore[arg-type]
@@ -527,7 +542,7 @@ def test_judge_called_with_cache_ttl_1h(session: Session) -> None:
         cluster_responses=[
             ClusterOutput(
                 clusters=[
-                    IdeaCard(
+                    _card(
                         problem_statement="p",
                         seed_keywords=["k"],
                         contributing_signal_ids=[raw.id],
@@ -655,7 +670,7 @@ def test_prepass_skips_marked_signals_on_subsequent_runs(
         cluster_responses=[
             ClusterOutput(
                 clusters=[
-                    IdeaCard(
+                    _card(
                         problem_statement="Real complaint normalized",
                         suspected_user="user",
                         seed_keywords=["foo"],
@@ -740,3 +755,111 @@ def test_prepass_falls_back_when_complaint_present_but_vertical_null(
     assert len(enriched) == 1
     assert enriched[0].vertical == "unknown"
     assert enriched[0].keywords == []
+
+
+# ───────────────────────── buildability (task 015) ───────────────────────
+
+
+def test_idea_card_requires_buildability() -> None:
+    """An IdeaCard JSON without `buildability` fails validation — the schema has
+    no default, so the cluster prompt MUST emit it (and old fixtures break,
+    forcing awareness). Per orchestrator request 030."""
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        IdeaCard.model_validate_json(
+            '{"problem_statement": "x", "seed_keywords": [], "contributing_signal_ids": []}'
+        )
+
+    # Sanity: with buildability present it validates.
+    ok = IdeaCard.model_validate_json(
+        '{"problem_statement": "x", "buildability": "low", "buildability_rationale": "r"}'
+    )
+    assert ok.buildability == Buildability.LOW
+
+
+def test_cluster_persists_buildability(session: Session) -> None:
+    """A new candidate carries the cluster's buildability + rationale + an
+    assessed_at timestamp. Per orchestrator request 030."""
+    src = _make_source(session)
+    raw, _ = _make_signal(session, src, text="remote-work culture is broken", weight=3)
+    session.commit()
+
+    stub = _StubLLM(
+        dedup_responses=[
+            SignalCoreComplaint(
+                core_complaint="culture gripe", vertical="work", keywords=["remote"]
+            )
+        ],
+        cluster_responses=[
+            ClusterOutput(
+                clusters=[
+                    _card(
+                        problem_statement="People dislike forced return-to-office",
+                        seed_keywords=["remote"],
+                        contributing_signal_ids=[raw.id],
+                        buildability=Buildability.NON_SOFTWARE,
+                        buildability_rationale="Cultural/management problem; software tangential.",
+                    )
+                ]
+            )
+        ],
+    )
+
+    cluster_signals(session, llm_client=stub)  # type: ignore[arg-type]
+    session.commit()
+
+    cand = session.execute(select(Candidate)).scalar_one()
+    assert cand.buildability == Buildability.NON_SOFTWARE
+    assert cand.buildability_rationale.startswith("Cultural")
+    assert cand.buildability_assessed_at is not None
+
+
+def test_dedup_match_does_not_overwrite_buildability(session: Session) -> None:
+    """Linking new signals to an existing candidate (dedup_key match) does NOT
+    re-assess buildability — it's a one-time, first-creation judgment."""
+    src = _make_source(session)
+    raw, _ = _make_signal(session, src, text="billing pain")
+    session.commit()
+
+    problem = "Founders need better billing tools"
+    existing = Candidate(
+        problem_statement=problem,
+        seed_keywords_json=["billing"],
+        dedup_key=_slugify(problem),
+        decision=Decision.PENDING,
+        pipeline_stage=PipelineStage.NONE,
+        buildability=Buildability.HIGH,
+        buildability_rationale="original assessment",
+    )
+    session.add(existing)
+    session.flush()
+    existing_id = existing.id
+    session.commit()
+
+    stub = _StubLLM(
+        dedup_responses=[
+            SignalCoreComplaint(core_complaint="x", vertical="billing", keywords=["billing"])
+        ],
+        cluster_responses=[
+            ClusterOutput(
+                clusters=[
+                    _card(
+                        problem_statement=problem,
+                        seed_keywords=["billing"],
+                        contributing_signal_ids=[raw.id],
+                        buildability=Buildability.LOW,  # would-be new value, must NOT apply
+                        buildability_rationale="new assessment",
+                    )
+                ]
+            )
+        ],
+    )
+    cluster_signals(session, llm_client=stub)  # type: ignore[arg-type]
+    session.commit()
+
+    refreshed = session.get(Candidate, existing_id)
+    assert refreshed is not None
+    assert refreshed.buildability == Buildability.HIGH, "dedup match must not re-assess"
+    assert refreshed.buildability_rationale == "original assessment"
