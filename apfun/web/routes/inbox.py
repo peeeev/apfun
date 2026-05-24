@@ -1,16 +1,18 @@
-"""`/inbox` — HITL inbox endpoint listing candidates and accepting decisions.
+"""`/inbox` — HITL triage workspace: listing, detail view, decisions.
 
-Lists `decision='pending'` candidates ordered by composite weight (sum of
-contributing signals' `social_proof_weight`), plus rejected candidates that
-have accumulated new signals since rejection ("re-review?" surface).
+Listing (`/inbox`) shows `decision='pending'` candidates ordered by composite
+weight (sum of contributing signals' `social_proof_weight`), plus rejected
+candidates that accumulated new signals since rejection ("re-review?").
+Status-filtered listings live at `/inbox/{approved,rejected,unsure}`. A detail
+view at `/inbox/<id>` shows every contributing signal with its text + source
+URL for cases the listing can't resolve.
 
-Approve / reject mutations land via HTMX POST and write an `approvals` row.
-Per orchestrator feedback 016 Q5: decisions are durable — the `decision`
-field on a candidate stays whatever the operator last set. Re-review prompts
-are surfaced via UI, not via auto-flipping the decision.
-
-Per `docs/tasks/013-admin-ui-base.md` + the bundled task 014 implementation
-agreed in feedback 018 (orchestrator routing).
+Decisions (approve / reject / unsure) land via HTMX POST and write an
+`approvals` row with the operator's free-text notes (reuses the existing
+`comment` column). Per orchestrator feedback 016 Q5: decisions are durable —
+new evidence never *auto*-flips a decision; the operator can always *explicitly*
+re-decide any candidate (that's not an auto-flip). Per task 014 + 014-fix-1
+(orchestrator request 028).
 """
 
 from __future__ import annotations
@@ -34,13 +36,26 @@ from apfun.models import (
     Candidate,
     CandidateSignal,
     Decision,
+    RawSignal,
     SignalText,
+    Source,
 )
+from apfun.pipeline._source_identifier import source_identifier
 
 router = APIRouter()
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+
+# ApprovalDecision (the operator action) → Decision (the candidate's status).
+_APPROVAL_TO_DECISION: dict[ApprovalDecision, Decision] = {
+    ApprovalDecision.APPROVE: Decision.APPROVED,
+    ApprovalDecision.REJECT: Decision.REJECTED,
+    ApprovalDecision.UNSURE: Decision.UNSURE,
+}
+
+# How many source badges to show inline before collapsing to "+N more".
+_MAX_BADGES = 3
 
 
 def _session() -> Iterator[Session]:
@@ -52,13 +67,49 @@ def _session() -> Iterator[Session]:
         session.close()
 
 
-def _candidate_view(session: Session, candidate: Candidate) -> dict[str, Any]:
-    """Project a Candidate into the dict the inbox templates render against.
+def _rel(dt: datetime | None, *, now: datetime) -> str:
+    """Compact relative-time string ("4h ago"). Detail-view captured_at."""
+    if dt is None:
+        return "—"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    secs = int((now - dt).total_seconds())
+    if secs < 0:
+        return "just now"
+    if secs < 3600:
+        return f"{secs // 60}m ago"
+    if secs < 86400:
+        return f"{secs // 3600}h ago"
+    return f"{secs // 86400}d ago"
 
-    Joins contributing signals to compute the composite social-proof weight
-    and the `signals_since_rejection` count (per feedback 016 Q5 — surfaced
-    in the UI for rejected candidates that accumulate new evidence).
+
+def _source_badges(session: Session, candidate_id: int) -> tuple[list[str], int]:
+    """Distinct source identifiers contributing to a candidate.
+
+    Returns `(first_N_badges, overflow_count)`. Joins via Source for the
+    authoritative kind + RawSignal for the payload the identifier is derived
+    from. Order is by first appearance (stable for a given candidate).
     """
+    rows = session.execute(
+        select(Source.kind, RawSignal.payload_json)
+        .join(RawSignal, RawSignal.source_id == Source.id)
+        .join(CandidateSignal, CandidateSignal.raw_signal_id == RawSignal.id)
+        .where(CandidateSignal.candidate_id == candidate_id)
+        .order_by(CandidateSignal.raw_signal_id)
+    ).all()
+    seen: set[str] = set()
+    badges: list[str] = []
+    for kind, payload in rows:
+        ident = source_identifier(kind, payload)
+        if ident not in seen:
+            seen.add(ident)
+            badges.append(ident)
+    overflow = max(len(badges) - _MAX_BADGES, 0)
+    return badges[:_MAX_BADGES], overflow
+
+
+def _candidate_view(session: Session, candidate: Candidate) -> dict[str, Any]:
+    """Project a Candidate into the dict the inbox templates render against."""
     sig_rows = session.execute(
         select(
             SignalText.text,
@@ -74,7 +125,6 @@ def _candidate_view(session: Session, candidate: Candidate) -> dict[str, Any]:
     weight_total = float(sum(float(r[1] or 0) for r in sig_rows))
 
     signals_since_rejection = 0
-    last_decided_at: datetime | None = None
     if candidate.decision == Decision.REJECTED:
         last_decided_at = session.execute(
             select(func.max(Approval.decided_at)).where(
@@ -87,6 +137,8 @@ def _candidate_view(session: Session, candidate: Candidate) -> dict[str, Any]:
                 1 for r in sig_rows if r[3] is not None and r[3] > last_decided_at
             )
 
+    badges, badges_more = _source_badges(session, candidate.id)
+
     return {
         "id": candidate.id,
         "problem_statement": candidate.problem_statement,
@@ -98,25 +150,28 @@ def _candidate_view(session: Session, candidate: Candidate) -> dict[str, Any]:
         "weight_total": weight_total,
         "signals_total": len(sig_rows),
         "signals_since_rejection": signals_since_rejection,
+        "source_badges": badges,
+        "source_badges_more": badges_more,
         "signals_preview": [
-            {
-                "text": r[0],
-                "weight": float(r[1] or 0),
-                "source_kind": r[2],
-            }
-            for r in sig_rows[:3]
+            {"text": r[0], "weight": float(r[1] or 0), "source_kind": r[2]} for r in sig_rows[:3]
         ],
     }
 
 
+# ─────────────────────────────── listings ──────────────────────────────
+
+# Status-filter listings beyond the default pending view. Each maps a URL
+# suffix to the Decision it shows + an empty-state line.
+_FILTERS: dict[str, tuple[Decision, str]] = {
+    "approved": (Decision.APPROVED, "No approved candidates yet."),
+    "rejected": (Decision.REJECTED, "No rejected candidates yet."),
+    "unsure": (Decision.UNSURE, "No candidates marked unsure yet."),
+}
+
+
 @router.get("/inbox", response_class=HTMLResponse)
 def inbox(request: Request, session: Annotated[Session, Depends(_session)]) -> HTMLResponse:
-    """List pending candidates + rejected-with-new-signals reminders.
-
-    Ordering: pending candidates first, ordered by composite signal weight
-    descending. Then rejected candidates with `signals_since_rejection > 0`
-    so operators see the re-review surface.
-    """
+    """Pending candidates (weight-desc) + rejected-with-new-signals reminders."""
     pending = (
         session.execute(
             select(Candidate).where(Candidate.decision == Decision.PENDING).order_by(Candidate.id)
@@ -134,7 +189,6 @@ def inbox(request: Request, session: Annotated[Session, Depends(_session)]) -> H
 
     pending_views = [_candidate_view(session, c) for c in pending]
     pending_views.sort(key=lambda v: -v["weight_total"])
-
     rejected_views = [
         v
         for v in (_candidate_view(session, c) for c in rejected)
@@ -146,10 +200,119 @@ def inbox(request: Request, session: Annotated[Session, Depends(_session)]) -> H
         "inbox.html",
         {
             "active": "inbox",
+            "filter": "pending",
             "pending": pending_views,
             "rejected_with_new_signals": rejected_views,
         },
     )
+
+
+@router.get("/inbox/{candidate_id:int}", response_class=HTMLResponse)
+def inbox_detail(
+    request: Request, candidate_id: int, session: Annotated[Session, Depends(_session)]
+) -> HTMLResponse:
+    """Detail view: candidate header + every contributing signal with source URL.
+
+    Declared BEFORE the string-param filter route below. The `:int` converter
+    only matches integer segments, so `/inbox/5` lands here while
+    `/inbox/approved` falls through to `inbox_filtered`. Order matters —
+    Starlette matches first-declared-first.
+    """
+    candidate = session.get(Candidate, candidate_id)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail=f"candidate {candidate_id} not found")
+
+    now = datetime.now(UTC)
+    rows = session.execute(
+        select(
+            SignalText.text,
+            SignalText.social_proof_weight,
+            Source.kind,
+            RawSignal.payload_json,
+            RawSignal.url,
+            RawSignal.captured_at,
+        )
+        .join(RawSignal, RawSignal.id == SignalText.raw_signal_id)
+        .join(Source, Source.id == RawSignal.source_id)
+        .join(CandidateSignal, CandidateSignal.raw_signal_id == SignalText.raw_signal_id)
+        .where(CandidateSignal.candidate_id == candidate_id)
+        .order_by(SignalText.social_proof_weight.desc())
+    ).all()
+
+    signals = [
+        {
+            "text": r[0],
+            "weight": float(r[1] or 0),
+            "source_identifier": source_identifier(r[2], r[3]),
+            "url": r[4],
+            "captured_rel": _rel(r[5], now=now),
+        }
+        for r in rows
+    ]
+
+    # Decision history (most-recent first): every approvals row for context.
+    history = (
+        session.execute(
+            select(Approval)
+            .where(Approval.candidate_id == candidate_id)
+            .order_by(Approval.decided_at.desc())
+        )
+        .scalars()
+        .all()
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "inbox_detail.html",
+        {
+            "active": "inbox",
+            "c": _candidate_view(session, candidate),
+            "signals": signals,
+            "history": [
+                {
+                    "decision": h.decision.value,
+                    "comment": h.comment or "",
+                    "decided_rel": _rel(h.decided_at, now=now),
+                }
+                for h in history
+            ],
+        },
+    )
+
+
+@router.get("/inbox/{status}", response_class=HTMLResponse)
+def inbox_filtered(
+    request: Request, status: str, session: Annotated[Session, Depends(_session)]
+) -> HTMLResponse:
+    """Status-filtered listing: /inbox/approved | /inbox/rejected | /inbox/unsure.
+
+    Reached only for non-integer segments (integers match the detail route
+    above). Unknown status → 404.
+    """
+    if status not in _FILTERS:
+        raise HTTPException(status_code=404, detail=f"unknown inbox filter: {status}")
+    decision, empty_msg = _FILTERS[status]
+    candidates = (
+        session.execute(
+            select(Candidate).where(Candidate.decision == decision).order_by(Candidate.id.desc())
+        )
+        .scalars()
+        .all()
+    )
+    views = [_candidate_view(session, c) for c in candidates]
+    return templates.TemplateResponse(
+        request,
+        "inbox.html",
+        {
+            "active": "inbox",
+            "filter": status,
+            "filtered": views,
+            "filtered_empty_msg": empty_msg,
+        },
+    )
+
+
+# ─────────────────────────────── decisions ─────────────────────────────
 
 
 def _decide(
@@ -158,6 +321,12 @@ def _decide(
     decision: ApprovalDecision,
     comment: str | None,
 ) -> Candidate:
+    """Write an approvals row + set the candidate's decision.
+
+    Operator-initiated; works on any candidate regardless of current state
+    (explicit re-decision is allowed — distinct from the auto-flip HITL
+    durability forbids). `comment` is the operator's free-text notes.
+    """
     candidate = session.get(Candidate, candidate_id)
     if candidate is None:
         raise HTTPException(status_code=404, detail=f"candidate {candidate_id} not found")
@@ -165,46 +334,54 @@ def _decide(
         Approval(
             candidate_id=candidate_id,
             decision=decision,
-            comment=comment,
+            comment=(comment or None),
             decided_at=datetime.now(UTC),
         )
     )
-    candidate.decision = (
-        Decision.APPROVED if decision == ApprovalDecision.APPROVE else Decision.REJECTED
-    )
+    candidate.decision = _APPROVAL_TO_DECISION[decision]
     session.commit()
     session.refresh(candidate)
     return candidate
 
 
-@router.post("/inbox/{candidate_id}/approve", response_class=HTMLResponse)
+def _decision_response(request: Request, session: Session, candidate: Candidate) -> HTMLResponse:
+    view = _candidate_view(session, candidate)
+    return templates.TemplateResponse(
+        request, "_candidate_card.html", {"c": view, "show_actions": False}
+    )
+
+
+@router.post("/inbox/{candidate_id:int}/approve", response_class=HTMLResponse)
 def approve(
     request: Request,
     candidate_id: int,
     session: Annotated[Session, Depends(_session)],
     comment: Annotated[str | None, Form()] = None,
 ) -> HTMLResponse:
-    """Approve a candidate. HTMX swaps in the updated card.
-
-    Writes one `approvals` row + flips `candidates.decision` to 'approved'.
-    """
+    """Approve a candidate (+ optional notes). HTMX swaps in the updated card."""
     candidate = _decide(session, candidate_id, ApprovalDecision.APPROVE, comment)
-    view = _candidate_view(session, candidate)
-    return templates.TemplateResponse(
-        request, "_candidate_card.html", {"c": view, "show_actions": False}
-    )
+    return _decision_response(request, session, candidate)
 
 
-@router.post("/inbox/{candidate_id}/reject", response_class=HTMLResponse)
+@router.post("/inbox/{candidate_id:int}/reject", response_class=HTMLResponse)
 def reject(
     request: Request,
     candidate_id: int,
     session: Annotated[Session, Depends(_session)],
     comment: Annotated[str | None, Form()] = None,
 ) -> HTMLResponse:
-    """Reject a candidate. HTMX swaps in the updated card."""
+    """Reject a candidate (+ optional notes)."""
     candidate = _decide(session, candidate_id, ApprovalDecision.REJECT, comment)
-    view = _candidate_view(session, candidate)
-    return templates.TemplateResponse(
-        request, "_candidate_card.html", {"c": view, "show_actions": False}
-    )
+    return _decision_response(request, session, candidate)
+
+
+@router.post("/inbox/{candidate_id:int}/unsure", response_class=HTMLResponse)
+def unsure(
+    request: Request,
+    candidate_id: int,
+    session: Annotated[Session, Depends(_session)],
+    comment: Annotated[str | None, Form()] = None,
+) -> HTMLResponse:
+    """Mark a candidate unsure (+ optional notes) — looked, couldn't decide."""
+    candidate = _decide(session, candidate_id, ApprovalDecision.UNSURE, comment)
+    return _decision_response(request, session, candidate)

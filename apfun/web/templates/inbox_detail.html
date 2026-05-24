@@ -1,0 +1,53 @@
+{% extends "_base.html" %}
+{% block title %}{{ c.problem_statement[:50] }} · inbox · apfun{% endblock %}
+{% block content %}
+<section class="space-y-4">
+  <p class="text-xs"><a href="/inbox" class="text-zinc-400 hover:text-white font-mono">← inbox</a></p>
+
+  {# Reuse the card for the header + decision controls (re-decidable here too). #}
+  {% include "_candidate_card.html" %}
+
+  <section class="mt-4">
+    <h2 class="text-base font-bold font-mono mb-2">Contributing signals ({{ signals|length }})</h2>
+    {% if signals %}
+      <div class="space-y-3">
+        {% for s in signals %}
+          <article class="candidate-card">
+            <div class="flex items-center justify-between gap-3 text-xs font-mono text-zinc-400">
+              <span class="tag tag-source">{{ s.source_identifier }}</span>
+              <span>w={{ "%.0f"|format(s.weight) }} · {{ s.captured_rel }}</span>
+            </div>
+            <p class="text-sm text-zinc-200 leading-snug mt-2 ops-signal-text">{{ s.text }}</p>
+            {% if s.url %}
+              <p class="mt-2 text-xs">
+                <a href="{{ s.url }}" target="_blank" rel="noopener noreferrer"
+                   class="text-emerald-300 hover:text-white font-mono">view original ↗</a>
+              </p>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="text-zinc-500 text-sm">No contributing signals found.</p>
+    {% endif %}
+  </section>
+
+  {% if history %}
+    <section class="mt-4">
+      <h2 class="text-base font-bold font-mono mb-2">Decision history</h2>
+      <table class="ops-table">
+        <thead><tr><th>when</th><th>decision</th><th>notes</th></tr></thead>
+        <tbody>
+          {% for h in history %}
+            <tr>
+              <td>{{ h.decided_rel }}</td>
+              <td class="font-mono">{{ h.decision }}</td>
+              <td>{{ h.comment }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% endif %}
+</section>
+{% endblock %}

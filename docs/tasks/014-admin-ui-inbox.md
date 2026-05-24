@@ -25,3 +25,7 @@ Depends on: 011, 013.
 ## Notes
 - Don't add toast notifications, modals, or animations. The bar is "feels like Vim, not Notion."
 - Single user; no CSRF token needed because Apache basic auth + same-origin is the perimeter. Document this in CLAUDE.md if not already.
+
+## Update: extended in task 014-fix-1 (orchestrator request 028)
+
+First real triage session surfaced UX friction. Task **014-fix-1** added: source badges in the listing, a detail view at `/inbox/<id>` (contributing signals + original-post URLs + decision history), an "unsure" decision state, a per-decision notes field (reuses the existing `approvals.comment` column), and status-filtered listings (`/inbox/approved|rejected|unsure`). Any candidate is re-decidable by explicit operator action (distinct from the auto-flip HITL durability forbids). See `docs/tasks/014-fix-1-inbox-ux.md`.

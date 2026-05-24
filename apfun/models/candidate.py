@@ -25,6 +25,12 @@ class Decision(StrEnum):
     APPROVED = "approved"
     REJECTED = "rejected"
     AUTO_KILLED = "auto_killed"
+    # UNSURE ≠ PENDING. PENDING = operator hasn't looked yet; UNSURE = looked
+    # and couldn't decide. Both are re-reviewable but conceptually distinct.
+    # Per orchestrator request 028. The operator may re-decide any candidate
+    # (an explicit re-decision — distinct from the auto-flip HITL durability
+    # forbids).
+    UNSURE = "unsure"
 
 
 class PipelineStage(StrEnum):
