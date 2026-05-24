@@ -14,6 +14,7 @@ from apfun.models.base import Base, IdMixin, TimestampMixin, check_enum_sql, enu
 class ApprovalDecision(StrEnum):
     APPROVE = "approve"
     REJECT = "reject"
+    UNSURE = "unsure"  # operator looked but couldn't decide (request 028)
 
 
 class Approval(Base, IdMixin, TimestampMixin):

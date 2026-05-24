@@ -130,6 +130,19 @@ button:hover, a:hover { text-decoration: none; }
 .tag-vertical { background-color: #1e3a8a; color: #93c5fd; }
 .tag-signals { background-color: #18181b; color: #d4d4d8; }
 .tag-alert { background-color: #78350f; color: #fcd34d; }
+.tag-source { background-color: #1e293b; color: #cbd5e1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Inbox decision controls (task 014-fix-1) */
+.btn-unsure { background-color: #3f3f46; color: #d4d4d8; }
+.btn-unsure:hover { background-color: #52525b; color: #fff; }
+.ops-notes {
+  width: 100%; resize: vertical; min-height: 2rem;
+  background-color: #18181b; color: #e4e4e7;
+  border: 1px solid #27272a; border-radius: 0.375rem;
+  padding: 0.375rem 0.5rem; font: inherit; font-size: 0.8125rem;
+}
+.ops-notes:focus { outline: none; border-color: #3f3f46; }
+.ops-signal-text { white-space: pre-wrap; word-break: break-word; }
 
 /* /ops dashboard (task 024) — desktop-oriented, dense tables + KPI cards */
 .ops-cards { display: flex; flex-wrap: wrap; gap: 0.75rem; }

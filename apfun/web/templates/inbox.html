@@ -4,31 +4,47 @@
 <section class="space-y-4">
   <header class="flex items-center justify-between">
     <h1 class="text-xl font-bold font-mono tracking-tight">Inbox</h1>
+    {% if filter == "pending" %}
     <p class="text-xs text-zinc-500 font-mono">
       pending={{ pending|length }} · rejected-with-new-signals={{ rejected_with_new_signals|length }}
     </p>
+    {% endif %}
   </header>
 
-  {% if pending %}
-    <div class="space-y-3" id="pending-list">
-      {% for c in pending %}
-        {% include "_candidate_card.html" %}
-      {% endfor %}
-    </div>
-  {% else %}
-    <p class="text-zinc-500 text-sm">No pending candidates. Stage 1 hasn't produced any review-needed items.</p>
-  {% endif %}
+  {# Status-filter nav. #}
+  <nav class="flex gap-3 text-xs font-mono">
+    {% for f in ["pending", "approved", "rejected", "unsure"] %}
+      <a href="{{ '/inbox' if f == 'pending' else '/inbox/' + f }}"
+         class="hover:text-white {{ 'text-white' if filter == f else 'text-zinc-400' }}">{{ f }}</a>
+    {% endfor %}
+  </nav>
 
-  {% if rejected_with_new_signals %}
-    <section class="mt-4">
-      <h2 class="text-base font-bold font-mono mb-2 text-amber-400">Re-review? (rejected with new signals)</h2>
-      <p class="text-xs text-zinc-500 mb-2">Decisions are durable — Stage 1 just kept linking signals after you rejected these.</p>
-      <div class="space-y-3" id="rejected-resurrect-list">
-        {% for c in rejected_with_new_signals %}
-          {% include "_candidate_card.html" %}
-        {% endfor %}
+  {% if filter == "pending" %}
+    {% if pending %}
+      <div class="space-y-3" id="pending-list">
+        {% for c in pending %}{% include "_candidate_card.html" %}{% endfor %}
       </div>
-    </section>
+    {% else %}
+      <p class="text-zinc-500 text-sm">No pending candidates. Stage 1 hasn't produced any review-needed items.</p>
+    {% endif %}
+
+    {% if rejected_with_new_signals %}
+      <section class="mt-4">
+        <h2 class="text-base font-bold font-mono mb-2 text-amber-400">Re-review? (rejected with new signals)</h2>
+        <p class="text-xs text-zinc-500 mb-2">Decisions are durable — Stage 1 just kept linking signals after you rejected these.</p>
+        <div class="space-y-3" id="rejected-resurrect-list">
+          {% for c in rejected_with_new_signals %}{% include "_candidate_card.html" %}{% endfor %}
+        </div>
+      </section>
+    {% endif %}
+  {% else %}
+    {% if filtered %}
+      <div class="space-y-3" id="filtered-list">
+        {% for c in filtered %}{% include "_candidate_card.html" %}{% endfor %}
+      </div>
+    {% else %}
+      <p class="text-zinc-500 text-sm">{{ filtered_empty_msg }}</p>
+    {% endif %}
   {% endif %}
 </section>
 {% endblock %}
