@@ -5,6 +5,7 @@ Apache strips/proxies basic-auth at the edge — this app does NOT look at
 """
 # pyright: reportMissingTypeStubs=false, reportUnknownMemberType=false
 
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -21,6 +22,8 @@ from apfun.config import settings
 from apfun.scheduler.setup import start_scheduler
 from apfun.web.routes import router as web_router
 
+logger = logging.getLogger(__name__)
+
 _STATIC_DIR = Path(__file__).resolve().parent / "web" / "static"
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "web" / "templates"
 
@@ -36,6 +39,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     If the operator paused the scheduler from /ops before a restart, re-apply
     the pause (APScheduler's pause() is in-memory only; the intent is persisted
     in `runtime_state`). Per orchestrator request 031 §1.
+
+    The pause re-apply is wrapped defensively: with `--reload`, new code boots
+    *before* the operator runs the migration, so the `runtime_state` table may
+    not exist yet. A missing table (or any DB hiccup) must NOT crash startup —
+    degrade to "not paused" and log. Otherwise the whole service is down for the
+    code-before-migration window, not just the routes that read the new schema.
+    (Tuition: shipping 014-fix-2 took /inbox + /ops down until `make migrate`.)
     """
     scheduler: BackgroundScheduler = start_scheduler()
     app.state.scheduler = scheduler
@@ -44,9 +54,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from apfun.db import SessionLocal
     from apfun.scheduler.pause_state import is_scheduler_paused
 
-    with SessionLocal() as session:
-        if is_scheduler_paused(session):
-            scheduler.pause()
+    try:
+        with SessionLocal() as session:
+            paused = is_scheduler_paused(session)
+    except Exception:  # noqa: BLE001 — startup must survive a not-yet-migrated DB
+        logger.warning(
+            "runtime_state unavailable at startup (migration pending?); starting un-paused",
+            exc_info=True,
+        )
+        paused = False
+    if paused:
+        scheduler.pause()
     try:
         yield
     finally:
