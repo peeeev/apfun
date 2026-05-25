@@ -6,13 +6,15 @@ One-time configuration for the apfun container before first run. Each section ma
 
 Everything under `apfun.online` is protected by the vhost's basic-auth; the app itself does no auth.
 
-- **`/inbox`** — HITL review queue: pending candidates, approve/reject.
-- **`/ops`** — operator dashboard (task 024 + 023-fix-1): KPI cards, scheduler job calendar with STALE warnings, recent runs, source health, LLM cost, recent
-   errors. Auto-refreshes every 30s. Desktop-oriented. This is the at-a-glance health view — check it instead of SSH-ing in to run `sqlite3` queries. Includes
-  a **"restart scheduler"** button (with confirmation) in the Scheduler section — tears down + restarts APScheduler in place without restarting uvicorn or the
-  container. Use when a job appears STALE. Every manual restart logs to `scheduler_runs` as `ops.manual_restart`.
+- **`/inbox`** — HITL review queue: pending candidates, approve/reject. Nav links show live counts (`pending (N)`, `approved (N)`, …). Tick the per-card
+  checkboxes and hit **"merge N selected"** (2+ required) to combine duplicates into one Opus-synthesized candidate (task 014-fix-2).
+- **`/ops`** — operator dashboard (task 024 + 023-fix-1 + 014-fix-2): KPI cards, scheduler job calendar with STALE warnings, recent runs, source health, LLM
+   cost, recent errors. Auto-refreshes every 30s. Desktop-oriented. This is the at-a-glance health view — check it instead of SSH-ing in to run `sqlite3` queries.
+   The Scheduler section has a status pill (running/paused/stopped) and three buttons: **stop**/**resume** (global pause/resume — only scheduled jobs stop;
+   triage + manual runs keep working; pause survives container restarts) and **restart** (tears down + restarts APScheduler in place when a job is STALE,
+   without restarting uvicorn). Each logs to `scheduler_runs` (`ops.manual_pause` / `ops.manual_resume` / `ops.manual_restart`).
 - **`/inbox/<id>`** — candidate detail view (task 014-fix-1): every contributing signal with its text, source label, and a link to the original post; plus
-  decision history.
+  decision history. A merged-away candidate redirects here to the candidate it was merged into.
 - **`/inbox/approved`**, **`/inbox/rejected`**, **`/inbox/unsure`** — status-filtered listings (task 014-fix-1). Any listed candidate can be re-decided
   (approve/reject/unsure with optional notes). "Unsure" = looked but couldn't decide (distinct from pending = not yet looked at).
 
@@ -107,3 +109,9 @@ APFUN_ANTHROPIC_API_KEY=... uv run python scripts/backfill_buildability.py
 It's idempotent (skips already-assessed candidates; per-candidate commit, so a crash is safe to resume by re-running) and aborts if the run cost exceeds `--budget` (default $5; expect ~$1.25 for ~168 candidates). `--dry-run` lists what would be assessed without spending a token. On a **fresh install** with no pre-existing candidates, there's nothing to backfill — new candidates get buildability at cluster time.
 
 After the backfill, refresh `/inbox` and verify the badges render; the detail view (`/inbox/<id>`) shows each candidate's buildability rationale. Buildability is a *hint* — you can still approve a `non_software` candidate; the `☐ hide non-software` toggle filters them from the listing if you want.
+
+## Scheduler pause + candidate merge (task 014-fix-2)
+
+**Pause the stream during a triage session.** On `/ops`, the Scheduler section's **stop** button pauses all scheduled ingest + pipeline jobs (the status pill turns yellow/"paused"). Triage, manual cluster runs, and LLM calls keep working — only the background firing stops. **resume** restarts firing. The pause is persisted, so it survives a container restart until you explicitly resume (it does NOT silently un-pause on deploy). Use **restart** (not stop/resume) for a STALE/wedged job.
+
+**Merge duplicates.** In any `/inbox` listing, tick the checkbox on 2+ candidates that are the same underlying problem and click **"merge N selected"**. Opus synthesizes a unified problem statement (+ re-assessed buildability); the sources are soft-deleted (hidden from listings; their detail pages redirect to the merged one) and their signals re-linked to the new candidate. The merged candidate is **pending** — re-triage it. Merging is not reversible in v1 (the `merged_into_id` chain is the audit trail). ~$0.013 per merge.

@@ -2,7 +2,14 @@
 {% block title %}{{ c.problem_statement[:50] }} · inbox · apfun{% endblock %}
 {% block content %}
 <section class="space-y-4">
-  <p class="text-xs"><a href="/inbox" class="text-zinc-400 hover:text-white font-mono">← inbox</a></p>
+  {# Same nav chrome (with counts) as the listing — request 031 §2. #}
+  {% include "_inbox_nav.html" %}
+
+  {% if merged_from %}
+    <p class="text-xs text-amber-300 font-mono border border-amber-900 rounded px-2 py-1">
+      Candidate #{{ merged_from }} was merged into this one.
+    </p>
+  {% endif %}
 
   {# Reuse the card for the header + decision controls (re-decidable here too). #}
   {% include "_candidate_card.html" %}

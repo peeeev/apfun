@@ -11,44 +11,69 @@
     {% endif %}
   </header>
 
-  {# Status-filter nav + buildability filter toggle. #}
-  <nav class="flex items-center gap-3 text-xs font-mono">
-    {% for f in ["pending", "approved", "rejected", "unsure"] %}
-      <a href="{{ '/inbox' if f == 'pending' else '/inbox/' + f }}"
-         class="hover:text-white {{ 'text-white' if filter == f else 'text-zinc-400' }}">{{ f }}</a>
-    {% endfor %}
-    <a href="{{ toggle_url }}"
-       class="ml-auto hover:text-white {{ 'text-white' if hide_non_software else 'text-zinc-400' }}">
-      {{ '☑' if hide_non_software else '☐' }} hide non-software
-    </a>
-  </nav>
+  {# Status-filter nav (with live counts) + buildability filter toggle. #}
+  {% include "_inbox_nav.html" %}
 
-  {% if filter == "pending" %}
-    {% if pending %}
-      <div class="space-y-3" id="pending-list">
-        {% for c in pending %}{% include "_candidate_card.html" %}{% endfor %}
-      </div>
-    {% else %}
-      <p class="text-zinc-500 text-sm">No pending candidates. Stage 1 hasn't produced any review-needed items.</p>
-    {% endif %}
+  {# Merge: one form wraps the whole listing; each card carries a `name="ids"`
+     checkbox (mergeable=true). Decision buttons are type="button" so they don't
+     submit this form. The submit button enables at 2+ selections (request 031 §3). #}
+  <form method="post" action="/inbox/merge" id="merge-form"
+        onsubmit="return confirm('Merge the selected candidates into one? Opus combines their problem statements into a new one; the merged candidate is PENDING (you re-triage it). Merging across decisions is allowed — the merged candidate is still pending. This is not easily reversible.');">
+    <div class="flex items-center gap-2 text-xs font-mono mb-2">
+      <button type="submit" id="merge-btn" class="btn btn-merge" disabled>
+        merge <span id="merge-count">0</span> selected
+      </button>
+      <span class="text-zinc-500">select 2+ candidates</span>
+    </div>
 
-    {% if rejected_with_new_signals %}
-      <section class="mt-4">
-        <h2 class="text-base font-bold font-mono mb-2 text-amber-400">Re-review? (rejected with new signals)</h2>
-        <p class="text-xs text-zinc-500 mb-2">Decisions are durable — Stage 1 just kept linking signals after you rejected these.</p>
-        <div class="space-y-3" id="rejected-resurrect-list">
-          {% for c in rejected_with_new_signals %}{% include "_candidate_card.html" %}{% endfor %}
+    {% set mergeable = true %}
+    {% if filter == "pending" %}
+      {% if pending %}
+        <div class="space-y-3" id="pending-list">
+          {% for c in pending %}{% include "_candidate_card.html" %}{% endfor %}
         </div>
-      </section>
-    {% endif %}
-  {% else %}
-    {% if filtered %}
-      <div class="space-y-3" id="filtered-list">
-        {% for c in filtered %}{% include "_candidate_card.html" %}{% endfor %}
-      </div>
+      {% else %}
+        <p class="text-zinc-500 text-sm">No pending candidates. Stage 1 hasn't produced any review-needed items.</p>
+      {% endif %}
+
+      {% if rejected_with_new_signals %}
+        <section class="mt-4">
+          <h2 class="text-base font-bold font-mono mb-2 text-amber-400">Re-review? (rejected with new signals)</h2>
+          <p class="text-xs text-zinc-500 mb-2">Decisions are durable — Stage 1 just kept linking signals after you rejected these.</p>
+          <div class="space-y-3" id="rejected-resurrect-list">
+            {% for c in rejected_with_new_signals %}{% include "_candidate_card.html" %}{% endfor %}
+          </div>
+        </section>
+      {% endif %}
     {% else %}
-      <p class="text-zinc-500 text-sm">{{ filtered_empty_msg }}</p>
+      {% if filtered %}
+        <div class="space-y-3" id="filtered-list">
+          {% for c in filtered %}{% include "_candidate_card.html" %}{% endfor %}
+        </div>
+      {% else %}
+        <p class="text-zinc-500 text-sm">{{ filtered_empty_msg }}</p>
+      {% endif %}
     {% endif %}
-  {% endif %}
+  </form>
 </section>
+
+<script>
+  // Merge selection: enable the submit button + update the counter at 2+ checks.
+  // Delegated on document so it survives HTMX card swaps after a decision.
+  (function () {
+    function update() {
+      var btn = document.getElementById('merge-btn');
+      if (!btn) return;
+      var n = document.querySelectorAll('input.merge-cb:checked').length;
+      btn.disabled = n < 2;
+      var cnt = document.getElementById('merge-count');
+      if (cnt) cnt.textContent = n;
+    }
+    document.addEventListener('change', function (e) {
+      if (e.target && e.target.classList && e.target.classList.contains('merge-cb')) update();
+    });
+    document.addEventListener('DOMContentLoaded', update);
+    update();
+  })();
+</script>
 {% endblock %}

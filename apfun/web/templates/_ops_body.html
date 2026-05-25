@@ -43,15 +43,45 @@
 {# ── 2. Scheduler job calendar ──────────────────────────────────────── #}
 <section class="mt-4">
   <header class="flex items-center justify-between mb-2">
-    <h2 class="ops-h2" style="margin-bottom: 0">Scheduler</h2>
-    <button class="btn btn-restart"
-            hx-post="/ops/scheduler/restart"
-            hx-target="#ops-body"
-            hx-swap="innerHTML"
-            hx-confirm="Restart the scheduler? In-flight jobs will be aborted; uvicorn keeps running."
-            hx-disabled-elt="this">
-      restart scheduler
-    </button>
+    <div class="flex items-center gap-2">
+      <h2 class="ops-h2" style="margin-bottom: 0">Scheduler</h2>
+      {% if scheduler_status == 'running' %}
+        <span class="ops-sched-status" title="firing scheduled jobs"><span class="ops-dot ops-dot-green"></span>running</span>
+      {% elif scheduler_status == 'paused' %}
+        <span class="ops-sched-status" title="alive but not firing scheduled jobs"><span class="ops-dot ops-dot-yellow"></span>paused</span>
+      {% else %}
+        <span class="ops-sched-status" title="not running"><span class="ops-dot ops-dot-red"></span>stopped</span>
+      {% endif %}
+    </div>
+    <div class="flex items-center gap-2">
+      {% if scheduler_status == 'paused' %}
+        <button class="btn btn-resume"
+                hx-post="/ops/scheduler/resume"
+                hx-target="#ops-body"
+                hx-swap="innerHTML"
+                hx-confirm="Resume the scheduler? Ingest + pipeline jobs start firing again."
+                hx-disabled-elt="this">
+          resume scheduler
+        </button>
+      {% else %}
+        <button class="btn btn-restart"
+                hx-post="/ops/scheduler/pause"
+                hx-target="#ops-body"
+                hx-swap="innerHTML"
+                hx-confirm="Pause the scheduler? Scheduled ingest + pipeline jobs stop firing (triage + manual runs keep working). Survives restarts until you resume."
+                hx-disabled-elt="this">
+          stop scheduler
+        </button>
+      {% endif %}
+      <button class="btn btn-restart"
+              hx-post="/ops/scheduler/restart"
+              hx-target="#ops-body"
+              hx-swap="innerHTML"
+              hx-confirm="Restart the scheduler? In-flight jobs will be aborted; uvicorn keeps running."
+              hx-disabled-elt="this">
+        restart scheduler
+      </button>
+    </div>
   </header>
   <table class="ops-table">
     <thead><tr><th>job</th><th>next run</th><th>status</th></tr></thead>

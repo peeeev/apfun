@@ -23,16 +23,19 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
+from starlette.responses import Response
 
 from apfun.db import SessionLocal
+from apfun.llm.client import LLMClient
 from apfun.models import (
     Approval,
     ApprovalDecision,
+    Buildability,
     Candidate,
     CandidateSignal,
     Decision,
@@ -41,6 +44,7 @@ from apfun.models import (
     Source,
 )
 from apfun.pipeline._source_identifier import source_identifier
+from apfun.pipeline.merge import MergeError, merge_candidates
 
 router = APIRouter()
 
@@ -74,6 +78,34 @@ def _toggle_url(base: str, *, currently_hidden: bool) -> str:
 
 def _hide_non_software(request: Request) -> bool:
     return request.query_params.get("hide_non_software") == "true"
+
+
+def _nav_counts(session: Session, *, current_decision: Decision) -> dict[str, int]:
+    """Live per-decision counts for the nav chrome (soft-deleted excluded).
+
+    `hide` = how many candidates the "hide non-software" filter would remove from
+    the CURRENT view (`current_decision` + `buildability='non_software'`) — i.e.
+    "matches the filter criteria," consistent regardless of toggle state. The
+    four decision counts are absolute (view-independent). Per orchestrator
+    request 031 §2. At ~200 candidates these 5 COUNTs are negligible; add a short
+    cache only if they ever exceed ~50ms total.
+    """
+    live = Candidate.merged_into_id.is_(None)
+    counts: dict[str, int] = {}
+    for d in (Decision.PENDING, Decision.APPROVED, Decision.REJECTED, Decision.UNSURE):
+        counts[d.value] = session.execute(
+            select(func.count()).select_from(Candidate).where(Candidate.decision == d, live)
+        ).scalar_one()
+    counts["hide"] = session.execute(
+        select(func.count())
+        .select_from(Candidate)
+        .where(
+            Candidate.decision == current_decision,
+            Candidate.buildability == Buildability.NON_SOFTWARE,
+            live,
+        )
+    ).scalar_one()
+    return counts
 
 
 def _session() -> Iterator[Session]:
@@ -197,16 +229,23 @@ _FILTERS: dict[str, tuple[Decision, str]] = {
 @router.get("/inbox", response_class=HTMLResponse)
 def inbox(request: Request, session: Annotated[Session, Depends(_session)]) -> HTMLResponse:
     """Pending candidates (weight-desc) + rejected-with-new-signals reminders."""
+    # `merged_into_id IS NULL` excludes soft-deleted (merged-away) candidates
+    # from every listing. Per orchestrator request 031 §3.
+    live = Candidate.merged_into_id.is_(None)
     pending = (
         session.execute(
-            select(Candidate).where(Candidate.decision == Decision.PENDING).order_by(Candidate.id)
+            select(Candidate)
+            .where(Candidate.decision == Decision.PENDING, live)
+            .order_by(Candidate.id)
         )
         .scalars()
         .all()
     )
     rejected = (
         session.execute(
-            select(Candidate).where(Candidate.decision == Decision.REJECTED).order_by(Candidate.id)
+            select(Candidate)
+            .where(Candidate.decision == Decision.REJECTED, live)
+            .order_by(Candidate.id)
         )
         .scalars()
         .all()
@@ -235,6 +274,7 @@ def inbox(request: Request, session: Annotated[Session, Depends(_session)]) -> H
             "rejected_with_new_signals": rejected_views,
             "hide_non_software": hide_ns,
             "toggle_url": _toggle_url("/inbox", currently_hidden=hide_ns),
+            "counts": _nav_counts(session, current_decision=Decision.PENDING),
         },
     )
 
@@ -242,18 +282,28 @@ def inbox(request: Request, session: Annotated[Session, Depends(_session)]) -> H
 @router.get("/inbox/{candidate_id:int}", response_class=HTMLResponse)
 def inbox_detail(
     request: Request, candidate_id: int, session: Annotated[Session, Depends(_session)]
-) -> HTMLResponse:
+) -> Response:
     """Detail view: candidate header + every contributing signal with source URL.
 
     Declared BEFORE the string-param filter route below. The `:int` converter
     only matches integer segments, so `/inbox/5` lands here while
     `/inbox/approved` falls through to `inbox_filtered`. Order matters —
     Starlette matches first-declared-first.
+
+    A soft-deleted (merged-away) candidate redirects to the candidate it was
+    merged into, carrying `?merged_from=<id>` so the target renders a banner.
+    Per orchestrator request 031 §3.
     """
     candidate = session.get(Candidate, candidate_id)
     if candidate is None:
         raise HTTPException(status_code=404, detail=f"candidate {candidate_id} not found")
+    if candidate.merged_into_id is not None:
+        return RedirectResponse(
+            url=f"/inbox/{candidate.merged_into_id}?merged_from={candidate_id}",
+            status_code=303,
+        )
 
+    merged_from = request.query_params.get("merged_from")
     now = datetime.now(UTC)
     rows = session.execute(
         select(
@@ -298,8 +348,13 @@ def inbox_detail(
         "inbox_detail.html",
         {
             "active": "inbox",
+            "filter": None,
             "c": _candidate_view(session, candidate),
             "signals": signals,
+            "merged_from": merged_from,
+            "counts": _nav_counts(session, current_decision=Decision.PENDING),
+            "toggle_url": _toggle_url("/inbox", currently_hidden=False),
+            "hide_non_software": False,
             "history": [
                 {
                     "decision": h.decision.value,
@@ -327,7 +382,9 @@ def inbox_filtered(
     hide_ns = _hide_non_software(request)
     candidates = (
         session.execute(
-            select(Candidate).where(Candidate.decision == decision).order_by(Candidate.id.desc())
+            select(Candidate)
+            .where(Candidate.decision == decision, Candidate.merged_into_id.is_(None))
+            .order_by(Candidate.id.desc())
         )
         .scalars()
         .all()
@@ -345,6 +402,7 @@ def inbox_filtered(
             "filtered_empty_msg": empty_msg,
             "hide_non_software": hide_ns,
             "toggle_url": _toggle_url(f"/inbox/{status}", currently_hidden=hide_ns),
+            "counts": _nav_counts(session, current_decision=decision),
         },
     )
 
@@ -422,3 +480,28 @@ def unsure(
     """Mark a candidate unsure (+ optional notes) — looked, couldn't decide."""
     candidate = _decide(session, candidate_id, ApprovalDecision.UNSURE, comment)
     return _decision_response(request, session, candidate)
+
+
+# ─────────────────────────────── merge ─────────────────────────────────
+
+
+@router.post("/inbox/merge")
+def merge(
+    request: Request,
+    session: Annotated[Session, Depends(_session)],
+    ids: Annotated[list[int] | None, Form()] = None,
+) -> RedirectResponse:
+    """Merge the selected candidates into one new pending candidate (request 031 §3).
+
+    Plain form POST (not HTMX) → 303 redirect to the new candidate's detail view,
+    so the operator lands on the merged result. The Opus synthesis runs inline;
+    this is a `def` (sync) handler, so it executes in Starlette's threadpool and
+    doesn't block the event loop — a deliberate, operator-initiated synchronous
+    action (the operator is waiting), in the same spirit as the /ops restart
+    button. `MergeError` (too few / missing / already-merged) → 400.
+    """
+    try:
+        new = merge_candidates(session, llm_client=LLMClient(), candidate_ids=ids or [])
+    except MergeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse(url=f"/inbox/{new.id}", status_code=303)
