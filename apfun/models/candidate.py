@@ -126,6 +126,17 @@ class Candidate(Base, IdMixin, TimestampMixin):
     buildability_assessed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Merge soft-deletion (task 014-fix-2). NULL = live; non-null = this candidate
+    # was merged into the referenced one and is soft-deleted (excluded from every
+    # listing via `WHERE merged_into_id IS NULL`). Self-referential FK; indexed
+    # per the explicit-FK-index convention. ON DELETE SET NULL so a hard-delete of
+    # the parent (not something we do — merges are soft) wouldn't orphan the ref.
+    # Per orchestrator request 031.
+    merged_into_id: Mapped[int | None] = mapped_column(
+        ForeignKey("candidates.id", ondelete="SET NULL", name="fk_candidates_merged_into_id"),
+        nullable=True,
+        index=True,
+    )
 
 
 class CandidateSignal(Base):

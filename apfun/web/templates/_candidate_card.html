@@ -2,7 +2,11 @@
 {# Caller passes `c` (candidate view dict) and optional `show_actions` (default True). #}
 <article class="candidate-card" data-decision="{{ c.decision }}" id="candidate-{{ c.id }}">
   <header class="flex items-start justify-between gap-3">
-    <h3 class="text-base font-mono leading-snug">
+    <h3 class="text-base font-mono leading-snug flex items-start gap-2">
+      {% if mergeable %}
+        <input type="checkbox" class="merge-cb mt-1" name="ids" value="{{ c.id }}"
+               aria-label="select candidate {{ c.id }} for merge">
+      {% endif %}
       <a href="/inbox/{{ c.id }}" class="hover:text-white">{{ c.problem_statement }}</a>
     </h3>
     <div class="flex flex-col items-end gap-1">
@@ -52,18 +56,20 @@
     <div class="mt-3 space-y-2">
       <textarea name="comment" rows="1" class="ops-notes"
                 placeholder="notes (optional) — why this decision?"></textarea>
+      {# type="button" so a click never submits the surrounding merge <form>
+         (a button with no type inside a form defaults to type="submit"). #}
       <div class="flex items-center gap-2">
-        <button class="btn btn-approve"
+        <button type="button" class="btn btn-approve"
                 hx-post="/inbox/{{ c.id }}/approve"
                 hx-include="closest article"
                 hx-target="#candidate-{{ c.id }}"
                 hx-swap="outerHTML">approve</button>
-        <button class="btn btn-reject"
+        <button type="button" class="btn btn-reject"
                 hx-post="/inbox/{{ c.id }}/reject"
                 hx-include="closest article"
                 hx-target="#candidate-{{ c.id }}"
                 hx-swap="outerHTML">reject</button>
-        <button class="btn btn-unsure"
+        <button type="button" class="btn btn-unsure"
                 hx-post="/inbox/{{ c.id }}/unsure"
                 hx-include="closest article"
                 hx-target="#candidate-{{ c.id }}"

@@ -16,6 +16,7 @@ from apfun.models.llm_run import LLMRun
 from apfun.models.opportunity import Opportunity, OpportunityStatus
 from apfun.models.project import Project, ProjectStatus
 from apfun.models.raw_signal import RawSignal
+from apfun.models.runtime_state import SCHEDULER_PAUSED_KEY, RuntimeState
 from apfun.models.scheduler_run import SchedulerRun
 from apfun.models.score import Score
 from apfun.models.signal_text import SignalText
@@ -40,7 +41,9 @@ __all__ = [
     "PipelineStage",
     "Project",
     "ProjectStatus",
+    "SCHEDULER_PAUSED_KEY",
     "RawSignal",
+    "RuntimeState",
     "SchedulerRun",
     "Score",
     "SignalText",

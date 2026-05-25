@@ -68,22 +68,43 @@ def _stub_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class _StubScheduler:
         running = True
+        # `state` mirrors APScheduler's int state (1=running, 2=paused,
+        # 0=stopped) — /ops reads it via `_scheduler_status`. Starts running.
+        state = 1
         shutdown_calls = 0
         start_calls = 0
+        pause_calls = 0
+        resume_calls = 0
         # Tests can set these to raise on the corresponding method call.
         shutdown_raises: BaseException | None = None
         start_raises: BaseException | None = None
+        pause_raises: BaseException | None = None
+        resume_raises: BaseException | None = None
 
         def shutdown(self, *, wait: bool = True) -> None:
             self.shutdown_calls += 1
             if self.shutdown_raises is not None:
                 raise self.shutdown_raises
             self.running = False
+            self.state = 0
 
         def start(self) -> None:
             self.start_calls += 1
             if self.start_raises is not None:
                 raise self.start_raises
             self.running = True
+            self.state = 1
+
+        def pause(self) -> None:
+            self.pause_calls += 1
+            if self.pause_raises is not None:
+                raise self.pause_raises
+            self.state = 2
+
+        def resume(self) -> None:
+            self.resume_calls += 1
+            if self.resume_raises is not None:
+                raise self.resume_raises
+            self.state = 1
 
     monkeypatch.setattr("apfun.main.start_scheduler", lambda: _StubScheduler())

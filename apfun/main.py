@@ -32,10 +32,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     `app.state.scheduler` lets `/healthz` report `running`.
     `app.state.started_at` lets `/ops` surface "service started Xh ago" so
     the operator can confirm a restart picked up the latest code.
+
+    If the operator paused the scheduler from /ops before a restart, re-apply
+    the pause (APScheduler's pause() is in-memory only; the intent is persisted
+    in `runtime_state`). Per orchestrator request 031 §1.
     """
     scheduler: BackgroundScheduler = start_scheduler()
     app.state.scheduler = scheduler
     app.state.started_at = datetime.now(UTC)
+
+    from apfun.db import SessionLocal
+    from apfun.scheduler.pause_state import is_scheduler_paused
+
+    with SessionLocal() as session:
+        if is_scheduler_paused(session):
+            scheduler.pause()
     try:
         yield
     finally:

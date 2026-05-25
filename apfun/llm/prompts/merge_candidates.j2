@@ -1,0 +1,41 @@
+{% include "_shared.j2" %}
+
+You are given {{ candidates | length }} candidate opportunity cards from a
+SaaS-opportunity funnel. The operator believes these cards describe the SAME
+underlying problem and wants them merged into one.
+
+Produce a single merged opportunity card:
+
+- `problem_statement`: a unified statement covering all the inputs. More general
+  than any individual input if they're variations of one problem, but specific
+  enough to stay actionable. Don't lose a distinct sub-problem by over-generalizing.
+- `suspected_user`: the user description that best encompasses all inputs (often
+  the broader/more general one). Use null if the inputs are genuinely silent.
+- `seed_keywords`: combined and deduplicated, lowercase, max 8.
+- `buildability`: re-assess for the MERGED problem (independent of cluster
+  quality). One of:
+  - `high`: clearly software-addressable; a founder could start next week.
+  - `medium`: partly software-addressable; needs non-software complements.
+  - `low`: software is a minor part; needs judgment/regulation/capital/scale.
+  - `non_software`: not a software/SaaS/service opportunity at all.
+- `buildability_rationale`: 1-2 sentences. Name the software-addressable
+  components if `high`/`medium`, or what's missing if `low`/`non_software`.
+
+Return STRICT JSON matching this schema. No prose, no markdown.
+
+{
+  "problem_statement": "unified statement covering all inputs",
+  "suspected_user": "one phrase | null",
+  "seed_keywords": ["lowercase", "deduped", "max 8"],
+  "buildability": "high | medium | low | non_software",
+  "buildability_rationale": "1-2 sentences"
+}
+
+CANDIDATES TO MERGE:
+{% for c in candidates %}
+[id={{ c.id }}]
+problem_statement: {{ c.problem_statement }}
+suspected_user: {{ c.suspected_user or "not identified" }}
+seed_keywords: {{ c.seed_keywords | join(", ") if c.seed_keywords else "none" }}
+
+{% endfor %}

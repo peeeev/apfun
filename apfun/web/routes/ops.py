@@ -21,6 +21,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
+from apscheduler.schedulers.base import (  # pyright: ignore[reportMissingTypeStubs]
+    STATE_PAUSED,
+    STATE_RUNNING,
+)
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -32,6 +36,7 @@ from starlette.requests import Request
 from apfun.db import SessionLocal
 from apfun.models import Candidate, Decision, LLMRun, RawSignal, SchedulerRun, SignalText, Source
 from apfun.scheduler.jobs import EXPECTED_JOB_IDS
+from apfun.scheduler.pause_state import set_scheduler_paused
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +100,23 @@ def _read_jobstore(session: Session) -> dict[str, float] | None:
         return None
     result = session.execute(text("SELECT id, next_run_time FROM apscheduler_jobs")).all()
     return {str(r[0]): r[1] for r in result if r[1] is not None}
+
+
+def _scheduler_status(scheduler: Any) -> str:
+    """Map the live scheduler's state to a template-friendly string.
+
+    `running` (firing jobs), `paused` (alive but not firing — operator stop),
+    `stopped` (shut down / not initialized). APScheduler's `.running` is True for
+    both running AND paused, so we read `.state` directly to tell them apart.
+    """
+    if scheduler is None:
+        return "stopped"
+    state = getattr(scheduler, "state", None)
+    if state == STATE_RUNNING:
+        return "running"
+    if state == STATE_PAUSED:
+        return "paused"
+    return "stopped"
 
 
 def _scheduler_section(session: Session, now: datetime) -> list[dict[str, Any]]:
@@ -208,12 +230,19 @@ def _cost_by_day(session: Session, now: datetime) -> list[dict[str, Any]]:
     ]
 
 
-def _collect(session: Session, started_at: datetime | None = None) -> dict[str, Any]:
+def _collect(
+    session: Session,
+    started_at: datetime | None = None,
+    scheduler_status: str = "running",
+) -> dict[str, Any]:
     """Build the full dashboard context. One pass; cheap aggregate queries.
 
     `started_at` is the process boot time (set in the FastAPI lifespan
     handler). Renders as "Xh Ym ago" at the top of the page so the operator
     can confirm a restart picked up the new code. None when not available.
+
+    `scheduler_status` is `running`/`paused`/`stopped` (from `_scheduler_status`)
+    so the Scheduler section can show the right indicator + Stop/Resume button.
     """
     now = datetime.now(UTC)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -287,6 +316,7 @@ def _collect(session: Session, started_at: datetime | None = None) -> dict[str, 
         "active": "ops",
         "generated": _fmt_rel(now, now=now),
         "service_started": _fmt_rel(started_at, now=now),
+        "scheduler_status": scheduler_status,
         "cards": {
             "pending": pending,
             "today_cost": float(today_cost),
@@ -339,14 +369,20 @@ def _collect(session: Session, started_at: datetime | None = None) -> dict[str, 
 def ops(request: Request, session: Annotated[Session, Depends(_session)]) -> HTMLResponse:
     """Full dashboard page (chrome + body)."""
     started_at = getattr(request.app.state, "started_at", None)
-    return templates.TemplateResponse(request, "ops.html", _safe_context(session, started_at))
+    status = _scheduler_status(getattr(request.app.state, "scheduler", None))
+    return templates.TemplateResponse(
+        request, "ops.html", _safe_context(session, started_at, status)
+    )
 
 
 @router.get("/ops/body", response_class=HTMLResponse)
 def ops_body(request: Request, session: Annotated[Session, Depends(_session)]) -> HTMLResponse:
     """Just the data area — polled by HTMX every 30s."""
     started_at = getattr(request.app.state, "started_at", None)
-    return templates.TemplateResponse(request, "_ops_body.html", _safe_context(session, started_at))
+    status = _scheduler_status(getattr(request.app.state, "scheduler", None))
+    return templates.TemplateResponse(
+        request, "_ops_body.html", _safe_context(session, started_at, status)
+    )
 
 
 @router.post("/ops/scheduler/restart", response_class=HTMLResponse)
@@ -411,12 +447,87 @@ def restart_scheduler(
     # boot time (distinct from the local `started_at`, which timed this
     # restart); thread it through so the body's "service started" row renders.
     service_started = getattr(request.app.state, "started_at", None)
+    status = _scheduler_status(scheduler)
     return templates.TemplateResponse(
-        request, "_ops_body.html", _safe_context(session, service_started)
+        request, "_ops_body.html", _safe_context(session, service_started, status)
     )
 
 
-def _safe_context(session: Session, started_at: datetime | None) -> dict[str, Any]:
+def _pause_or_resume(request: Request, session: Session, *, pause: bool) -> HTMLResponse:
+    """Shared body for the pause + resume endpoints (they're mirror images).
+
+    Global pause/resume via APScheduler's `pause()`/`resume()` — NOT `shutdown()`.
+    Pause keeps the scheduler alive and all job state intact; only scheduled
+    firings stop. Operator-initiated cluster runs, triage actions, and LLM calls
+    all keep working. The intent is persisted to `runtime_state` so it survives a
+    container restart (the lifespan re-applies it). Always logs a
+    `scheduler_runs` audit row. Per orchestrator request 031 §1 + the /ops
+    mutation pattern (explicit, logged, idempotent, minimal-scope).
+    """
+    action = "pause" if pause else "resume"
+    job_id = f"ops.manual_{action}"
+    scheduler = getattr(request.app.state, "scheduler", None)
+    started_at = datetime.now(UTC)
+    error_msg: str | None = None
+
+    if scheduler is None:
+        error_msg = f"scheduler not initialized on app.state — {action} aborted"
+        logger.error("%s: %s", job_id, error_msg)
+    else:
+        try:
+            # pause()/resume() are idempotent enough for our purposes, but
+            # APScheduler raises if the scheduler is stopped — caught + recorded
+            # rather than 500-ing the operator's page.
+            if pause:
+                scheduler.pause()
+            else:
+                scheduler.resume()
+            set_scheduler_paused(session, pause)
+        except Exception as exc:  # noqa: BLE001 — record + surface, don't 500
+            error_msg = f"{type(exc).__name__}: {exc}"
+            logger.exception("%s failed", job_id)
+
+    finished_at = datetime.now(UTC)
+    session.add(
+        SchedulerRun(
+            job_id=job_id,
+            started_at=started_at,
+            finished_at=finished_at,
+            ok=(error_msg is None),
+            error=error_msg,
+            items_processed=None,
+        )
+    )
+    session.commit()
+
+    service_started = getattr(request.app.state, "started_at", None)
+    status = _scheduler_status(scheduler)
+    return templates.TemplateResponse(
+        request, "_ops_body.html", _safe_context(session, service_started, status)
+    )
+
+
+@router.post("/ops/scheduler/pause", response_class=HTMLResponse)
+def pause_scheduler(
+    request: Request, session: Annotated[Session, Depends(_session)]
+) -> HTMLResponse:
+    """Stop the scheduler from firing scheduled jobs (global, reversible)."""
+    return _pause_or_resume(request, session, pause=True)
+
+
+@router.post("/ops/scheduler/resume", response_class=HTMLResponse)
+def resume_scheduler(
+    request: Request, session: Annotated[Session, Depends(_session)]
+) -> HTMLResponse:
+    """Resume scheduled job firing after a pause."""
+    return _pause_or_resume(request, session, pause=False)
+
+
+def _safe_context(
+    session: Session,
+    started_at: datetime | None,
+    scheduler_status: str = "running",
+) -> dict[str, Any]:
     """Collect dashboard data, degrading to a busy-state flag on a locked DB.
 
     SQLite read locks can briefly block under concurrent writes; render a
@@ -428,8 +539,8 @@ def _safe_context(session: Session, started_at: datetime | None) -> dict[str, An
     None when called from a test that didn't go through the lifespan.
     """
     try:
-        ctx = _collect(session, started_at)
+        ctx = _collect(session, started_at, scheduler_status)
         ctx["db_busy"] = False
         return ctx
     except OperationalError:
-        return {"active": "ops", "db_busy": True}
+        return {"active": "ops", "db_busy": True, "scheduler_status": scheduler_status}

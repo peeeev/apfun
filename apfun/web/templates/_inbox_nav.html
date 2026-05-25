@@ -1,0 +1,14 @@
+{# Shared inbox nav chrome: status-filter links with live counts + the
+   buildability filter toggle. Included by the listing AND the detail view so
+   the same nav + counts appear everywhere (request 031 §2).
+   Context: filter (active link | None), counts (dict), toggle_url, hide_non_software. #}
+<nav class="flex items-center gap-3 text-xs font-mono">
+  {% for f in ["pending", "approved", "rejected", "unsure"] %}
+    <a href="{{ '/inbox' if f == 'pending' else '/inbox/' + f }}"
+       class="hover:text-white {{ 'text-white' if filter == f else 'text-zinc-400' }}">{{ f }} ({{ counts[f] }})</a>
+  {% endfor %}
+  <a href="{{ toggle_url }}"
+     class="ml-auto hover:text-white {{ 'text-white' if hide_non_software else 'text-zinc-400' }}">
+    {{ '☑' if hide_non_software else '☐' }} hide non-software ({{ counts.hide }})
+  </a>
+</nav>

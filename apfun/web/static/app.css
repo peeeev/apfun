@@ -128,6 +128,16 @@ button:hover, a:hover { text-decoration: none; }
 .btn-restart { background-color: #78350f; color: #fcd34d; font-size: 0.75rem; }
 .btn-restart:hover { background-color: #92400e; color: #fff; }
 .btn-restart:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-resume { background-color: #064e3b; color: #6ee7b7; font-size: 0.75rem; }
+.btn-resume:hover { background-color: #065f46; color: #fff; }
+.btn-resume:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Scheduler running/paused/stopped status pill (task 014-fix-2) */
+.ops-sched-status { display: inline-flex; align-items: center; gap: 0.375rem; font-size: 0.75rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #a1a1aa; }
+.ops-dot { width: 0.5rem; height: 0.5rem; border-radius: 9999px; display: inline-block; }
+.ops-dot-green { background-color: #34d399; }
+.ops-dot-yellow { background-color: #fbbf24; }
+.ops-dot-red { background-color: #f87171; }
 
 .tag { display: inline-flex; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; background-color: #27272a; color: #a1a1aa; }
 .tag-vertical { background-color: #1e3a8a; color: #93c5fd; }
@@ -149,6 +159,11 @@ button:hover, a:hover { text-decoration: none; }
 /* Inbox decision controls (task 014-fix-1) */
 .btn-unsure { background-color: #3f3f46; color: #d4d4d8; }
 .btn-unsure:hover { background-color: #52525b; color: #fff; }
+
+/* Merge button (task 014-fix-2) */
+.btn-merge { background-color: #3730a3; color: #c7d2fe; font-size: 0.75rem; }
+.btn-merge:hover { background-color: #4338ca; color: #fff; }
+.btn-merge:disabled { opacity: 0.45; cursor: not-allowed; }
 .ops-notes {
   width: 100%; resize: vertical; min-height: 2rem;
   background-color: #18181b; color: #e4e4e7;
