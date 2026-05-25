@@ -119,3 +119,45 @@ def test_pause_records_failure_when_scheduler_raises(
             assert is_scheduler_paused(s) is False
     finally:
         stub.pause_raises = None
+
+
+def test_paused_scheduler_marks_jobs_paused_not_scheduled(
+    client_with_session: tuple[TestClient, sessionmaker],
+) -> None:
+    """A paused scheduler must not render jobs as '✓ scheduled' (pause() freezes
+    next_run_time, so they won't fire and would otherwise drift into false STALE).
+    Per operator report."""
+    import time
+
+    from sqlalchemy import text
+
+    from apfun.scheduler.jobs import EXPECTED_JOB_IDS
+
+    client, factory = client_with_session
+    job_id = next(iter(EXPECTED_JOB_IDS))
+    with factory() as s:
+        s.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS apscheduler_jobs (id VARCHAR(191) NOT NULL "
+                "PRIMARY KEY, next_run_time FLOAT, job_state BLOB NOT NULL)"
+            )
+        )
+        s.execute(
+            text(
+                "INSERT INTO apscheduler_jobs (id, next_run_time, job_state) "
+                "VALUES (:id, :nrt, :st)"
+            ),
+            {"id": job_id, "nrt": time.time() + 3600, "st": b"x"},
+        )
+        s.commit()
+
+    # Running: the seeded job reads as scheduled.
+    assert "✓ scheduled" in client.get("/ops/body").text
+
+    # Paused: the job flips to "paused", a frozen-times note appears, and nothing
+    # claims to be scheduled.
+    client.post("/ops/scheduler/pause")
+    body = client.get("/ops/body").text
+    assert "⏸ paused" in body
+    assert "frozen" in body
+    assert "✓ scheduled" not in body

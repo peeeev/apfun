@@ -119,7 +119,9 @@ def _scheduler_status(scheduler: Any) -> str:
     return "stopped"
 
 
-def _scheduler_section(session: Session, now: datetime) -> list[dict[str, Any]]:
+def _scheduler_section(
+    session: Session, now: datetime, *, paused: bool = False
+) -> list[dict[str, Any]]:
     jobstore = _read_jobstore(session)
     out: list[dict[str, Any]] = []
     for job_id in EXPECTED_JOB_IDS:
@@ -127,14 +129,17 @@ def _scheduler_section(session: Session, now: datetime) -> list[dict[str, Any]]:
             out.append({"job_id": job_id, "when": {"rel": "—", "abs": ""}, "status": "disabled"})
             continue
         next_dt = datetime.fromtimestamp(jobstore[job_id], tz=UTC)
-        stale = next_dt < now - _STALE_GRACE
-        out.append(
-            {
-                "job_id": job_id,
-                "when": _fmt_rel(next_dt, now=now),
-                "status": "stale" if stale else "scheduled",
-            }
-        )
+        # When the scheduler is paused, pause() froze the jobstore's
+        # next_run_time — the job won't fire, and that (drifting-into-the-past)
+        # time would otherwise read as a false STALE. Report "paused" so the
+        # table doesn't claim these jobs are about to run. Per operator report.
+        if paused:
+            status = "paused"
+        elif next_dt < now - _STALE_GRACE:
+            status = "stale"
+        else:
+            status = "scheduled"
+        out.append({"job_id": job_id, "when": _fmt_rel(next_dt, now=now), "status": status})
     return out
 
 
@@ -327,7 +332,7 @@ def _collect(
             if total_candidates
             else 0.0,
         },
-        "jobs": _scheduler_section(session, now_for_rel),
+        "jobs": _scheduler_section(session, now_for_rel, paused=(scheduler_status == "paused")),
         "recent_runs": [
             {
                 "started": _fmt_rel(r.started_at, now=now_for_rel),

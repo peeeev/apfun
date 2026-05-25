@@ -83,6 +83,9 @@
       </button>
     </div>
   </header>
+  {% if scheduler_status == 'paused' %}
+    <p class="text-xs text-amber-300 mb-2">⏸ Paused — no jobs are firing. The next-run times below are frozen until you resume.</p>
+  {% endif %}
   <table class="ops-table">
     <thead><tr><th>job</th><th>next run</th><th>status</th></tr></thead>
     <tbody>
@@ -92,6 +95,7 @@
           <td title="{{ j.when.abs }}">{{ j.when.rel }}</td>
           <td>
             {% if j.status == 'scheduled' %}<span class="text-emerald-300">✓ scheduled</span>
+            {% elif j.status == 'paused' %}<span class="text-amber-300">⏸ paused</span>
             {% elif j.status == 'stale' %}<span class="text-red-300 font-bold">⚠ STALE</span>
             {% else %}<span class="text-zinc-500">⏸ disabled</span>{% endif %}
           </td>
