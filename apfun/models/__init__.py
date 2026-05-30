@@ -11,6 +11,7 @@ from apfun.models.candidate import (
     PipelineStage,
 )
 from apfun.models.competitive_analysis import CompetitiveAnalysis
+from apfun.models.dataforseo_usage import DataForSEOUsage
 from apfun.models.demand_check import DemandCheck, DemandVerdict
 from apfun.models.llm_run import LLMRun
 from apfun.models.opportunity import Opportunity, OpportunityStatus
@@ -31,6 +32,7 @@ __all__ = [
     "Candidate",
     "CandidateSignal",
     "CompetitiveAnalysis",
+    "DataForSEOUsage",
     "Decision",
     "DemandCheck",
     "DemandVerdict",

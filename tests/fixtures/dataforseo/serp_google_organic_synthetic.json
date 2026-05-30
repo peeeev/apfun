@@ -1,0 +1,72 @@
+{
+  "_fixture_meta": "SYNTHETIC — based on DataForSEO docs for serp/google/organic/live/advanced. Real Sandbox capture lands during runbook 005; replace this file (drop the _fixture_meta key) once the operator runs the runbook. Schema fields: see https://docs.dataforseo.com/v3/serp/google/organic/live/advanced (verified 2026-05-30).",
+  "version": "0.1.20260530",
+  "status_code": 20000,
+  "status_message": "Ok.",
+  "time": "1.0234 sec.",
+  "cost": 0.002,
+  "tasks_count": 1,
+  "tasks_error": 0,
+  "tasks": [
+    {
+      "id": "05301234-1234-0066-0000-aaaaaaaaaaaa",
+      "status_code": 20000,
+      "status_message": "Ok.",
+      "time": "1.0123 sec.",
+      "cost": 0.002,
+      "result_count": 1,
+      "path": ["v3", "serp", "google", "organic", "live", "advanced"],
+      "data": {
+        "api": "serp",
+        "function": "live",
+        "se": "google",
+        "se_type": "organic",
+        "language_code": "en",
+        "location_code": 2840,
+        "keyword": "best note-taking app for founders",
+        "depth": 10
+      },
+      "result": [
+        {
+          "keyword": "best note-taking app for founders",
+          "type": "organic",
+          "se_domain": "google.com",
+          "location_code": 2840,
+          "language_code": "en",
+          "check_url": "https://www.google.com/search?q=best+note-taking+app+for+founders",
+          "datetime": "2026-05-30 12:00:00 +00:00",
+          "items_count": 10,
+          "items": [
+            {
+              "type": "organic",
+              "rank_group": 1,
+              "rank_absolute": 1,
+              "domain": "notion.so",
+              "title": "Notion — your wiki, docs, & projects. Together.",
+              "url": "https://www.notion.so/",
+              "description": "A new tool that blends your everyday work apps into one."
+            },
+            {
+              "type": "organic",
+              "rank_group": 2,
+              "rank_absolute": 2,
+              "domain": "obsidian.md",
+              "title": "Obsidian — sharpen your thinking",
+              "url": "https://obsidian.md/",
+              "description": "Obsidian is the private and flexible note-taking app."
+            },
+            {
+              "type": "organic",
+              "rank_group": 3,
+              "rank_absolute": 3,
+              "domain": "roamresearch.com",
+              "title": "Roam Research — a note taking tool for networked thought",
+              "url": "https://roamresearch.com/",
+              "description": "As easy to use as a document. As powerful as a graph database."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

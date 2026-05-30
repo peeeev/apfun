@@ -33,8 +33,18 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
+from apfun.config import settings as _global_settings
 from apfun.db import SessionLocal
-from apfun.models import Candidate, Decision, LLMRun, RawSignal, SchedulerRun, SignalText, Source
+from apfun.models import (
+    Candidate,
+    DataForSEOUsage,
+    Decision,
+    LLMRun,
+    RawSignal,
+    SchedulerRun,
+    SignalText,
+    Source,
+)
 from apfun.scheduler.jobs import EXPECTED_JOB_IDS
 from apfun.scheduler.pause_state import set_scheduler_paused
 
@@ -212,6 +222,56 @@ def _cost_by_task(session: Session) -> list[dict[str, Any]]:
     ]
 
 
+def _dataforseo_budget(session: Session, now: datetime) -> dict[str, Any]:
+    """Current-month DataForSEO spend, split by endpoint family + last-call snapshot.
+
+    Per orchestrator request 033 §"/ops dashboard new section". Reads
+    `dataforseo_usage` directly (the per-call audit table); the budget cap comes
+    from `settings.dataforseo_budget_usd_per_month`. Cheap aggregate at all
+    plausible scales (one row per API call, ~50 a week).
+    """
+    cap = float(_global_settings.dataforseo_budget_usd_per_month)
+    start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    by_family_rows = session.execute(
+        select(
+            DataForSEOUsage.family,
+            func.count().label("calls"),
+            func.coalesce(func.sum(DataForSEOUsage.est_cost_usd), 0.0).label("spent"),
+        )
+        .where(DataForSEOUsage.created_at >= start_of_month)
+        .group_by(DataForSEOUsage.family)
+    ).all()
+    spent = sum(float(r.spent) for r in by_family_rows)
+    by_family = [
+        {"family": r.family, "calls": int(r.calls), "spent": float(r.spent)}
+        for r in sorted(by_family_rows, key=lambda r: -float(r.spent))
+    ]
+    last = session.execute(
+        select(DataForSEOUsage).order_by(DataForSEOUsage.id.desc()).limit(1)
+    ).scalar_one_or_none()
+    last_call: dict[str, Any] | None = None
+    if last is not None:
+        last_call = {
+            "when": _fmt_rel(last.created_at, now=now),
+            "family": last.family,
+            "ok": bool(last.ok),
+            "endpoint": last.endpoint,
+            "error": (last.error or "")[:120],
+        }
+    # `configured` tells the template whether to show "configure credentials" copy
+    # or the spend numbers — empty creds at boot is the pre-runbook-005 state.
+    configured = bool(_global_settings.dataforseo_login and _global_settings.dataforseo_password)
+    return {
+        "configured": configured,
+        "cap_usd": cap,
+        "spent_usd": spent,
+        "remaining_usd": max(cap - spent, 0.0),
+        "pct_used": (spent / cap * 100.0) if cap > 0 else 0.0,
+        "by_family": by_family,
+        "last_call": last_call,
+    }
+
+
 def _cost_by_day(session: Session, now: datetime) -> list[dict[str, Any]]:
     since = now - timedelta(days=7)
     rows = session.execute(
@@ -349,6 +409,7 @@ def _collect(
         "sources": _sources_section(session, now_for_rel),
         "cost_by_task": _cost_by_task(session),
         "cost_by_day": _cost_by_day(session, now_for_rel),
+        "dataforseo_budget": _dataforseo_budget(session, now_for_rel),
         "cache_hit_ratio": cache_hit_ratio,
         "sched_errors": [
             {

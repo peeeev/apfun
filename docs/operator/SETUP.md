@@ -65,6 +65,30 @@ Loud-failure: missing/empty key surfaces at first LLM call with a clear error. T
 
 Only needed if you enable ProductHunt ingestion (task 007). Same loud-failure shape as Anthropic — set `APFUN_PRODUCTHUNT_TOKEN` and restart.
 
+## DataForSEO (task 015)
+
+Required once Stages 2/3/4 are wired up (tasks 011, 016, 017). The client lives at `apfun/clients/dataforseo.py`; runbook 005 (`docs/operator/runbooks/005-dataforseo-first-pass.md`) is the empirical gate.
+
+**One-time setup:**
+
+1. Sign up at https://dataforseo.com.
+2. **Deposit $50 (minimum).** Required to use the API beyond the $1 trial credit; pay-per-use beyond that.
+3. At https://app.dataforseo.com/api-access, **generate a dedicated API password.** This is the **#1 source of integration failures** per DataForSEO's own guides — it is NOT your account login password, it's a separate password specifically for API access.
+4. Confirm the Google Ads Keyword Data API is enabled on the account under the "APIs" tab (default-enabled, but worth checking).
+5. Set on the host (`/srv/claude/apfun.online/.env`):
+   ```
+   APFUN_DATAFORSEO_LOGIN=<your-registration-email>
+   APFUN_DATAFORSEO_PASSWORD=<dedicated-api-password>
+   # leave default; runbook 005 flips this to production after a green sandbox test:
+   # APFUN_DATAFORSEO_BASE_URL=https://sandbox.dataforseo.com/v3/
+   # default monthly cap is $25; raise here if you ever need more:
+   # APFUN_DATAFORSEO_BUDGET_USD_PER_MONTH=25.0
+   ```
+6. Restart the container. Loud failure: missing/empty creds raise at first call with a CLAUDE.md-pointing message naming the dedicated-password trap.
+7. Run runbook 005 to validate end-to-end (Sandbox → real fixtures → switch to production → first real calls).
+
+**Budget cap** (default $25/month, soft cap): each call's pre-check sums `dataforseo_usage.est_cost_usd` for the current calendar month; if it would cross the cap, the call raises `DataForSEOBudgetExceededError`. Operator raises `APFUN_DATAFORSEO_BUDGET_USD_PER_MONTH` in `.env` + restarts to resume. `/ops` has a "DataForSEO budget" section showing current spend, split by endpoint family, and the last-call status.
+
 ## Post-rebuild bootstrap
 
 After any container rebuild (`docker compose up -d --build`), some state lives outside the image and needs to be re-established. Run:
