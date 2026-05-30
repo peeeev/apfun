@@ -31,7 +31,7 @@ Sequenced, PR-sized, each ~half-day and independently testable. Numbers are the 
 
 ## Phase E — Stages 3–5 (paid + expensive)
 
-- 015 — DataForSEO client + budget guard ($25/mo hard cap, daily usage table)
+- 015 — DataForSEO client + budget guard ($25/mo soft cap, per-call `dataforseo_usage` table) — **foundation shipped** (orchestrator request 033); two endpoint families exposed (SERP + Google Ads Keyword Data). Consumers in tasks 016/017. Operator empirical gate at runbook 005 (deferred until $50 deposit).
 - 016 — Stage 3 competitor scraping (pricing pages, feature lists, recent funding)
 - 017 — Stage 4 saturation scoring (Demand × UnmetPain / IncumbentStrength, full breakdown persisted)
 - 018 — Stage 5 differentiation synthesis (Opus 4.7: complaints / feature gaps / pricing gaps / vertical wedge)

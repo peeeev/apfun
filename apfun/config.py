@@ -1,5 +1,7 @@
 """Settings loaded from environment with the APFUN_ prefix."""
 
+from typing import Literal
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -19,6 +21,27 @@ class Settings(BaseSettings):
     reddit_http_proxy: str = ""
     producthunt_token: str = ""
 
+    # DataForSEO (task 015 / orchestrator request 033). Two creds — login is the
+    # account email; password is the DEDICATED API password from
+    # https://app.dataforseo.com/api-access, NOT the account login password
+    # (the #1 source of integration failures per DataForSEO's own guides).
+    # Empty defaults — fail-loud at first client construction (per the
+    # auth-secret discipline: 401s are clear, no silent degradation).
+    dataforseo_login: str = ""
+    dataforseo_password: str = ""
+    # Monthly soft cap (USD). At full Stage 3+4 throughput ~$15/mo; $25 leaves
+    # ~60% headroom. Crossing it raises DataForSEOBudgetExceededError; operator
+    # must explicitly raise the cap (env var + restart) to resume.
+    dataforseo_budget_usd_per_month: float = 25.0
+    # Sandbox-first build pattern (spec Q2). The PR ships pointed at Sandbox so
+    # runbook 005 can validate parsing/auth shape free of charge; operator
+    # switches to https://api.dataforseo.com/v3/ after a green smoke test.
+    dataforseo_base_url: str = "https://sandbox.dataforseo.com/v3/"
+    # Almost always "standard" (~5min latency, cheapest). Override per-call via
+    # the client kwarg if a particular run needs Priority/Live; the global
+    # default sets the floor.
+    dataforseo_serp_queue_mode: Literal["standard", "priority", "live"] = "standard"
+
     @field_validator("host")
     @classmethod
     def reject_localhost(cls, v: str) -> str:
@@ -28,6 +51,16 @@ class Settings(BaseSettings):
                 "from the host at 0.0.0.0:4000 (see CLAUDE.md → Networking). Use 0.0.0.0."
             )
         return v
+
+    @field_validator("dataforseo_base_url", mode="after")
+    @classmethod
+    def _normalize_dataforseo_base_url(cls, v: str) -> str:
+        """Guarantee exactly one trailing slash so `httpx.Client(base_url=...)`
+        joins endpoint paths cleanly regardless of how the operator wrote the
+        env var. Empty → use the default sandbox URL."""
+        if not v:
+            return "https://sandbox.dataforseo.com/v3/"
+        return v.rstrip("/") + "/"
 
     @field_validator("reddit_http_proxy", mode="after")
     @classmethod
